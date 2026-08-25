@@ -1,8 +1,13 @@
 import 'dotenv/config';
 import express from 'express';
 import path from 'path';
+import fs from 'fs';
+import { execFile } from 'child_process';
+import util from 'util';
 import { initializeApp, cert } from 'firebase-admin';
 import { getFirestore, Firestore } from 'firebase-admin/firestore';
+
+const execFileAsync = util.promisify(execFile);
 
 // Initialize Firebase Admin SDK if service account is provided
 let db: Firestore | null = null;
@@ -34,6 +39,15 @@ function sanitizeFilename(name: string): string {
     .trim()
     .slice(0, 120);
   return cleaned || 'youtube_download';
+}
+
+// Find yt-dlp executable path
+function getYtDlpPath(): string {
+  const localBin = path.join(process.cwd(), 'bin', 'yt-dlp');
+  if (fs.existsSync(localBin)) {
+    return localBin;
+  }
+  return 'yt-dlp';
 }
 
 // Extract Video ID and detect Shorts from YouTube URL
@@ -117,7 +131,7 @@ async function extractYouTubeMedia(targetUrl: string) {
       label: '4K Ultra HD (2160p)',
       quality: '2160p (4K)',
       resolutionNumber: 2160,
-      description: 'Maximum resolution 4K Ultra HD video stream with HDR visuals',
+      description: 'Maximum resolution 4K Ultra HD video stream',
       badge: '4K ULTRA HD',
       type: 'video_4k',
       url: videoId,
@@ -141,7 +155,7 @@ async function extractYouTubeMedia(targetUrl: string) {
       label: '1080p Full HD (Recommended)',
       quality: '1080p Full HD',
       resolutionNumber: 1080,
-      description: 'Crystal-clear 1080p Full HD MP4 with synchronized audio',
+      description: 'Crystal-clear 1080p Full HD MP4 video',
       badge: '1080p FULL HD',
       type: 'video_1080p',
       url: videoId,
@@ -240,16 +254,17 @@ app.post('/api/extract', async (req, res) => {
   }
 });
 
-// API 2: Proxy Download with Attachment Headers
+// API 2: Direct Proxy Download with Attachment Headers
+// Streams binary MP4, MP3, and JPG directly into user's Downloads folder
 app.get('/api/proxy-download', async (req, res) => {
   try {
     const { url, id, quality, type, filename, ext } = req.query;
 
     const safeFilename = sanitizeFilename(typeof filename === 'string' ? filename : 'youtube_media');
-    const fileExt = typeof ext === 'string' ? ext.replace('.', '').toLowerCase() : 'mp4';
+    let fileExt = typeof ext === 'string' ? ext.replace('.', '').toLowerCase() : 'mp4';
 
     // 1. Direct Thumbnail Image Download
-    if (typeof url === 'string' && url.trim()) {
+    if (typeof url === 'string' && url.trim() && (url.includes('ytimg.com') || fileExt === 'jpg' || fileExt === 'png')) {
       const targetUrl = url.trim();
       const imgRes = await fetch(targetUrl, {
         headers: {
@@ -262,12 +277,13 @@ app.get('/api/proxy-download', async (req, res) => {
         const buffer = await imgRes.arrayBuffer();
         res.setHeader('Content-Disposition', `attachment; filename="${safeFilename}.jpg"`);
         res.setHeader('Content-Type', 'image/jpeg');
+        res.setHeader('Content-Length', String(buffer.byteLength));
         res.setHeader('Cache-Control', 'public, max-age=86400');
         return res.end(Buffer.from(buffer));
       }
     }
 
-    // 2. Video & Audio Direct Download Gateway
+    // 2. Video & Audio Direct Stream Extraction
     const videoId = typeof id === 'string' && id.trim() ? id.trim() : (typeof url === 'string' ? parseYouTubeUrl(url)?.videoId : '');
     if (!videoId) {
       return res.status(400).json({ error: 'Missing video identifier.' });
@@ -276,26 +292,84 @@ app.get('/api/proxy-download', async (req, res) => {
     const isAudio = type === 'audio' || fileExt === 'mp3';
     const targetQuality = typeof quality === 'string' ? quality.toLowerCase() : '1080';
 
-    let formatCode = '1080';
+    // Map quality format string to optimal yt-dlp stream format selector
+    let formatSelector = '137/248/399/bestvideo[height<=1080]';
     if (isAudio) {
-      formatCode = 'mp3';
+      formatSelector = '140/251/bestaudio';
+      fileExt = 'mp3';
     } else if (targetQuality.includes('2160') || targetQuality.includes('4k')) {
-      formatCode = '4k';
+      formatSelector = '401/313/bestvideo[height<=2160]';
     } else if (targetQuality.includes('1440') || targetQuality.includes('2k')) {
-      formatCode = '1440';
+      formatSelector = '400/271/bestvideo[height<=1440]';
     } else if (targetQuality.includes('720')) {
-      formatCode = '720';
+      formatSelector = '136/247/398/bestvideo[height<=720]';
     } else if (targetQuality.includes('360')) {
-      formatCode = '360';
+      formatSelector = '134/243/396/bestvideo[height<=360]';
     }
 
-    // Route to direct loader download button card
-    const gatewayUrl = `https://loader.to/api/button/?url=https://www.youtube.com/watch?v=${videoId}&f=${formatCode}`;
-    return res.redirect(gatewayUrl);
+    // Execute direct stream URL extraction
+    const ytDlpBinary = getYtDlpPath();
+    const ytUrl = `https://www.youtube.com/watch?v=${videoId}`;
+    
+    let directStreamUrl = '';
+    try {
+      const { stdout } = await execFileAsync(ytDlpBinary, ['-g', '-f', formatSelector, ytUrl], { timeout: 12000 });
+      directStreamUrl = stdout.trim().split('\n')[0].trim();
+    } catch (execErr: any) {
+      console.warn('yt-dlp primary selector fallback:', execErr?.message);
+      // Fallback to best available format
+      try {
+        const { stdout } = await execFileAsync(ytDlpBinary, ['-g', '-f', isAudio ? 'bestaudio' : 'best', ytUrl], { timeout: 12000 });
+        directStreamUrl = stdout.trim().split('\n')[0].trim();
+      } catch (fallbackErr: any) {
+        console.error('yt-dlp extraction failed:', fallbackErr?.message);
+      }
+    }
+
+    if (!directStreamUrl || !directStreamUrl.startsWith('http')) {
+      return res.status(500).json({ error: 'Could not resolve direct media stream. Please try another quality.' });
+    }
+
+    // Stream GoogleVideo CDN directly to user with attachment headers
+    const streamRes = await fetch(directStreamUrl, {
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36',
+        Referer: 'https://www.youtube.com/',
+      },
+    });
+
+    if (!streamRes.ok) {
+      return res.status(streamRes.status).json({ error: `Upstream media server returned ${streamRes.status}` });
+    }
+
+    const contentType = isAudio ? 'audio/mpeg' : 'video/mp4';
+    const contentLength = streamRes.headers.get('content-length');
+
+    res.setHeader('Content-Disposition', `attachment; filename="${safeFilename}.${fileExt}"`);
+    res.setHeader('Content-Type', contentType);
+    if (contentLength) {
+      res.setHeader('Content-Length', contentLength);
+    }
+    res.setHeader('Cache-Control', 'public, max-age=3600');
+
+    if (streamRes.body) {
+      const reader = streamRes.body.getReader();
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) {
+          res.end();
+          break;
+        }
+        res.write(Buffer.from(value));
+      }
+    } else {
+      const buffer = await streamRes.arrayBuffer();
+      res.end(Buffer.from(buffer));
+    }
   } catch (err: any) {
     console.error('Download proxy error:', err);
     if (!res.headersSent) {
-      res.status(500).json({ error: 'Failed to initiate media download.' });
+      res.status(500).json({ error: 'Failed to stream media file.' });
     }
   }
 });
