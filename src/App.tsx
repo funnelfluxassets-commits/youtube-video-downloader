@@ -183,7 +183,13 @@ export default function App() {
         body: JSON.stringify({ url: targetUrl.trim() }),
       });
 
-      const data = await res.json();
+      const text = await res.text();
+      let data: any = {};
+      try {
+        data = JSON.parse(text);
+      } catch {
+        throw new Error("Could not process the video. Please verify the YouTube URL and try again.");
+      }
 
       if (!res.ok || !data.success) {
         throw new Error(data.error || 'Failed to extract video. Please check the URL.');
