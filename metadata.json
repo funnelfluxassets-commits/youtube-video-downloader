@@ -1,0 +1,6 @@
+{
+  "name": "TubeDownloader",
+  "description": "Download YouTube videos and Shorts in 4K Ultra HD, 1080p Full HD MP4 or extract 320kbps MP3 audio directly with zero API keys required.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

@@ -1,0 +1,46 @@
+@import "tailwindcss";
+
+@custom-variant dark (&:where(.dark, .dark *));
+
+/* Remove tap highlight on mobile */
+* {
+  -webkit-tap-highlight-color: transparent;
+}
+
+/* Prevent browser autofill from adding grey/yellow/blue backgrounds in light and dark mode */
+input:-webkit-autofill,
+input:-webkit-autofill:hover,
+input:-webkit-autofill:focus,
+input:-webkit-autofill:active {
+  -webkit-box-shadow: 0 0 0 1000px #ffffff inset !important;
+  -webkit-text-fill-color: #18181b !important;
+  caret-color: #e11d48 !important;
+  transition: background-color 5000s ease-in-out 0s;
+}
+
+.dark input:-webkit-autofill,
+.dark input:-webkit-autofill:hover,
+.dark input:-webkit-autofill:focus,
+.dark input:-webkit-autofill:active {
+  -webkit-box-shadow: 0 0 0 1000px #18181b inset !important;
+  -webkit-text-fill-color: #f4f4f5 !important;
+  caret-color: #fb7185 !important;
+  transition: background-color 5000s ease-in-out 0s;
+}
+
+input {
+  -webkit-appearance: none;
+  appearance: none;
+  background-color: transparent;
+}
+
+.dark input,
+.dark input:disabled,
+.dark input:focus,
+.dark input:active {
+  color-scheme: dark;
+}
+
+input:disabled {
+  background-color: transparent !important;
+}
