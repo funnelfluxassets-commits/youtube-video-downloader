@@ -26,19 +26,11 @@ try {
 const app = express();
 app.use(express.json());
 
-// Helper to format byte size
-function formatBytes(bytes?: number): string | undefined {
-  if (!bytes || bytes <= 0) return undefined;
-  const sizes = ['B', 'KB', 'MB', 'GB'];
-  const i = Math.floor(Math.log(bytes) / Math.log(1024));
-  return `${(bytes / Math.pow(1024, i)).toFixed(1)} ${sizes[i]}`;
-}
-
 // Sanitize filename for download
 function sanitizeFilename(name: string): string {
   const cleaned = name
-    .replace(/[<>:"/\\|?*\x00-\x1F]/g, '') // remove illegal filesystem characters
-    .replace(/[\s_]+/g, '_') // normalize spaces and underscores
+    .replace(/[<>:"/\\|?*\x00-\x1F]/g, '')
+    .replace(/[\s_]+/g, '_')
     .trim()
     .slice(0, 120);
   return cleaned || 'youtube_download';
@@ -88,7 +80,7 @@ function parseYouTubeUrl(inputUrl: string): { videoId: string; isShorts: boolean
 async function extractYouTubeMedia(targetUrl: string) {
   const parsed = parseYouTubeUrl(targetUrl);
   if (!parsed) {
-    throw new Error('Invalid YouTube URL. Please enter a valid YouTube video or Shorts link (e.g. https://www.youtube.com/watch?v=... or /shorts/...).');
+    throw new Error('Invalid YouTube URL. Please enter a valid YouTube video or Shorts link.');
   }
 
   const { videoId, isShorts, cleanUrl } = parsed;
@@ -104,7 +96,7 @@ async function extractYouTubeMedia(targetUrl: string) {
     const oembedUrl = `https://www.youtube.com/oembed?url=https://www.youtube.com/watch?v=${videoId}&format=json`;
     const oembedRes = await fetch(oembedUrl, {
       headers: {
-        'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
+        'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36',
       },
     });
 
@@ -118,109 +110,91 @@ async function extractYouTubeMedia(targetUrl: string) {
     console.warn('oEmbed notice:', err);
   }
 
-  // 2. Build Multi-Resolution Download Streams
-  const downloads: any[] = [];
-
-  // 1. 4K Ultra HD (2160p)
-  downloads.push({
-    id: 'yt_4k_2160p',
-    label: '4K Ultra HD (2160p)',
-    quality: '2160p (4K)',
-    resolutionNumber: 2160,
-    description: 'Maximum resolution 4K Ultra HD video stream with HDR visuals',
-    badge: '4K ULTRA HD',
-    type: 'video_4k',
-    url: videoId,
-    extension: 'mp4',
-    hasAudio: true,
-    recommend: false,
-  });
-
-  // 2. 2K Quad HD (1440p)
-  downloads.push({
-    id: 'yt_2k_1440p',
-    label: '2K Quad HD (1440p)',
-    quality: '1440p (2K)',
-    resolutionNumber: 1440,
-    description: 'High-definition 1440p QHD format for large screens',
-    badge: '2K QHD',
-    type: 'video_2k',
-    url: videoId,
-    extension: 'mp4',
-    hasAudio: true,
-    recommend: false,
-  });
-
-  // 3. 1080p Full HD (Recommended)
-  downloads.push({
-    id: 'yt_1080p_fhd',
-    label: '1080p Full HD (Recommended)',
-    quality: '1080p Full HD',
-    resolutionNumber: 1080,
-    description: 'Crystal-clear 1080p Full HD MP4 with synchronized audio',
-    badge: '1080p FULL HD',
-    type: 'video_1080p',
-    url: videoId,
-    extension: 'mp4',
-    hasAudio: true,
-    recommend: true,
-  });
-
-  // 4. 720p HD (Fast Download)
-  downloads.push({
-    id: 'yt_720p_hd',
-    label: '720p HD (Fast Download)',
-    quality: '720p HD',
-    resolutionNumber: 720,
-    description: 'Standard HD MP4 format for fast mobile & desktop saving',
-    badge: '720p HD',
-    type: 'video_720p',
-    url: videoId,
-    extension: 'mp4',
-    hasAudio: true,
-    recommend: false,
-  });
-
-  // 5. 360p / 480p Fast Mobile MP4
-  downloads.push({
-    id: 'yt_360p_sd',
-    label: '360p / 480p Standard MP4',
-    quality: '360p Standard',
-    resolutionNumber: 360,
-    description: 'Compact file size for quick messaging and sharing',
-    badge: 'Standard MP4',
-    type: 'video_360p',
-    url: videoId,
-    extension: 'mp4',
-    hasAudio: true,
-    recommend: false,
-  });
-
-  // 6. High Quality 320kbps MP3 Audio
-  downloads.push({
-    id: 'yt_audio_mp3',
-    label: 'Download Audio (MP3)',
-    quality: 'Audio Soundtrack (320kbps)',
-    description: 'Extract and save speech, song, or background sound in MP3',
-    badge: 'MP3 AUDIO',
-    type: 'audio',
-    url: videoId,
-    extension: 'mp3',
-    recommend: false,
-  });
-
-  // 7. HD Thumbnail Artwork
-  downloads.push({
-    id: 'yt_cover_image',
-    label: 'Download HD Thumbnail Cover',
-    quality: 'High Resolution Image (1280x720)',
-    description: 'Full-resolution video artwork image in JPG format',
-    badge: 'HD IMAGE',
-    type: 'thumbnail',
-    url: maxResThumbnail,
-    extension: 'jpg',
-    recommend: false,
-  });
+  // 2. Build Multi-Resolution Download Options
+  const downloads: any[] = [
+    {
+      id: 'yt_4k_2160p',
+      label: '4K Ultra HD (2160p)',
+      quality: '2160p (4K)',
+      resolutionNumber: 2160,
+      description: 'Maximum resolution 4K Ultra HD video stream with HDR visuals',
+      badge: '4K ULTRA HD',
+      type: 'video_4k',
+      url: videoId,
+      extension: 'mp4',
+      recommend: false,
+    },
+    {
+      id: 'yt_2k_1440p',
+      label: '2K Quad HD (1440p)',
+      quality: '1440p (2K)',
+      resolutionNumber: 1440,
+      description: 'High-definition 1440p QHD format for large screens',
+      badge: '2K QHD',
+      type: 'video_2k',
+      url: videoId,
+      extension: 'mp4',
+      recommend: false,
+    },
+    {
+      id: 'yt_1080p_fhd',
+      label: '1080p Full HD (Recommended)',
+      quality: '1080p Full HD',
+      resolutionNumber: 1080,
+      description: 'Crystal-clear 1080p Full HD MP4 with synchronized audio',
+      badge: '1080p FULL HD',
+      type: 'video_1080p',
+      url: videoId,
+      extension: 'mp4',
+      recommend: true,
+    },
+    {
+      id: 'yt_720p_hd',
+      label: '720p HD (Fast Download)',
+      quality: '720p HD',
+      resolutionNumber: 720,
+      description: 'Standard HD MP4 format for fast mobile & desktop saving',
+      badge: '720p HD',
+      type: 'video_720p',
+      url: videoId,
+      extension: 'mp4',
+      recommend: false,
+    },
+    {
+      id: 'yt_360p_sd',
+      label: '360p / 480p Standard MP4',
+      quality: '360p Standard',
+      resolutionNumber: 360,
+      description: 'Compact file size for quick messaging and sharing',
+      badge: 'Standard MP4',
+      type: 'video_360p',
+      url: videoId,
+      extension: 'mp4',
+      recommend: false,
+    },
+    {
+      id: 'yt_audio_mp3',
+      label: 'Download Audio (MP3)',
+      quality: 'Audio Soundtrack (320kbps)',
+      description: 'Extract and save speech, song, or background sound in MP3',
+      badge: 'MP3 AUDIO',
+      type: 'audio',
+      url: videoId,
+      extension: 'mp3',
+      recommend: false,
+    },
+    {
+      id: 'yt_cover_image',
+      label: 'Download HD Thumbnail Cover',
+      quality: 'High Resolution Image (1280x720)',
+      description: 'Full-resolution video artwork image in JPG format',
+      badge: 'HD IMAGE',
+      type: 'thumbnail',
+      url: maxResThumbnail,
+      extension: 'jpg',
+      recommend: false,
+    },
+  ];
 
   return {
     id: videoId,
@@ -267,7 +241,6 @@ app.post('/api/extract', async (req, res) => {
 });
 
 // API 2: Proxy Download with Attachment Headers
-// Handles direct thumbnail downloads and routes video/audio downloads directly to browser
 app.get('/api/proxy-download', async (req, res) => {
   try {
     const { url, id, quality, type, filename, ext } = req.query;
@@ -280,9 +253,9 @@ app.get('/api/proxy-download', async (req, res) => {
       const targetUrl = url.trim();
       const imgRes = await fetch(targetUrl, {
         headers: {
-          'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
+          'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36',
           Referer: 'https://www.youtube.com/',
-        }
+        },
       });
 
       if (imgRes.ok) {
@@ -300,16 +273,25 @@ app.get('/api/proxy-download', async (req, res) => {
       return res.status(400).json({ error: 'Missing video identifier.' });
     }
 
-    // High-speed converter stream target
     const isAudio = type === 'audio' || fileExt === 'mp3';
-    const targetQuality = typeof quality === 'string' ? quality : (isAudio ? 'mp3' : '1080');
+    const targetQuality = typeof quality === 'string' ? quality.toLowerCase() : '1080';
 
-    // Route to direct fast download service with attachment header
-    const directGatewayUrl = isAudio
-      ? `https://api.mp3youtube.cc/v2/converter?id=${videoId}&format=mp3`
-      : `https://api.mp3youtube.cc/v2/converter?id=${videoId}&format=mp4&quality=${targetQuality.includes('2160') ? '2160' : targetQuality.includes('1440') ? '1440' : targetQuality.includes('1080') ? '1080' : '720'}`;
+    let formatCode = '1080';
+    if (isAudio) {
+      formatCode = 'mp3';
+    } else if (targetQuality.includes('2160') || targetQuality.includes('4k')) {
+      formatCode = '4k';
+    } else if (targetQuality.includes('1440') || targetQuality.includes('2k')) {
+      formatCode = '1440';
+    } else if (targetQuality.includes('720')) {
+      formatCode = '720';
+    } else if (targetQuality.includes('360')) {
+      formatCode = '360';
+    }
 
-    return res.redirect(directGatewayUrl);
+    // Route to direct loader download button card
+    const gatewayUrl = `https://loader.to/api/button/?url=https://www.youtube.com/watch?v=${videoId}&f=${formatCode}`;
+    return res.redirect(gatewayUrl);
   } catch (err: any) {
     console.error('Download proxy error:', err);
     if (!res.headersSent) {
