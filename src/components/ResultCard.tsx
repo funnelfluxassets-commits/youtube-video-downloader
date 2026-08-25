@@ -3,36 +3,34 @@ import { YouTubeMediaResult, DownloadOption } from '../types';
 import {
   Download,
   Play,
-  Pause,
-  Music,
-  Eye,
-  ThumbsUp,
   Copy,
   Check,
   ExternalLink,
   Sparkles,
   Film,
-  CheckCircle2,
   FileVideo,
   FileAudio,
   AlertCircle,
-  FileEdit,
   RotateCcw,
   Tag,
   Tv,
   Smartphone,
+  CheckCircle2,
+  Loader2,
 } from 'lucide-react';
 
 interface ResultCardProps {
   result: YouTubeMediaResult;
-  onDownloadAttempt?: () => boolean;
+  canDownload: () => boolean;
+  onSuccessfulDownload: () => void;
 }
 
-export const ResultCard: React.FC<ResultCardProps> = ({ result, onDownloadAttempt }) => {
+export const ResultCard: React.FC<ResultCardProps> = ({ result, canDownload, onSuccessfulDownload }) => {
   const [isPlayingVideo, setIsPlayingVideo] = useState(false);
-  const [isPlayingAudio, setIsPlayingAudio] = useState(false);
   const [copiedCaption, setCopiedCaption] = useState(false);
   const [downloadingId, setDownloadingId] = useState<string | null>(null);
+  const [downloadSuccessId, setDownloadSuccessId] = useState<string | null>(null);
+  const [downloadError, setDownloadError] = useState<string | null>(null);
   const [selectedDownloadId, setSelectedDownloadId] = useState<string | null>(
     () => result.downloads.find((d) => d.recommend)?.id || result.downloads[0]?.id || null
   );
@@ -60,14 +58,6 @@ export const ResultCard: React.FC<ResultCardProps> = ({ result, onDownloadAttemp
   }, [authorSlug, titleSlug]);
 
   const [customFilename, setCustomFilename] = useState<string>(presetCreatorCaption);
-  const [isEditingFilename, setIsEditingFilename] = useState<boolean>(false);
-  const [downloadError, setDownloadError] = useState<string | null>(null);
-
-  const formatNumber = (num: number): string => {
-    if (num >= 1_000_000) return (num / 1_000_000).toFixed(1) + 'M';
-    if (num >= 1_000) return (num / 1_000).toFixed(1) + 'K';
-    return num.toLocaleString();
-  };
 
   const handleCopyCaption = () => {
     if (result.title) {
@@ -78,11 +68,13 @@ export const ResultCard: React.FC<ResultCardProps> = ({ result, onDownloadAttemp
   };
 
   const handleTriggerDownload = async (option: DownloadOption) => {
-    if (onDownloadAttempt && !onDownloadAttempt()) {
+    if (!canDownload()) {
       return;
     }
+
     setDownloadingId(option.id);
     setDownloadError(null);
+
     try {
       const baseName = cleanForFilename(customFilename.trim()) || presetCreatorCaption;
       let suffix = '';
@@ -91,38 +83,50 @@ export const ResultCard: React.FC<ResultCardProps> = ({ result, onDownloadAttemp
       } else if (option.type === 'thumbnail') {
         suffix = '_thumbnail';
       } else if (option.quality) {
-        suffix = `_${option.quality.replace(/\s+/g, '')}`;
+        suffix = `_${option.quality.replace(/[\s()]/g, '')}`;
       }
 
       const safeTitle = `${baseName}${suffix}`;
-      const downloadEndpoint = `/api/proxy-download?url=${encodeURIComponent(option.url)}&filename=${encodeURIComponent(safeTitle)}&ext=${option.extension}`;
-      
-      const response = await fetch(downloadEndpoint);
-      if (!response.ok) {
-        const errorData = await response.json().catch(() => null);
-        throw new Error(errorData?.error || `Download server returned status ${response.status}`);
+
+      if (option.type === 'thumbnail') {
+        // Direct HD Thumbnail Download
+        const endpoint = `/api/proxy-download?url=${encodeURIComponent(result.cover)}&filename=${encodeURIComponent(safeTitle)}&ext=jpg`;
+        const res = await fetch(endpoint);
+        if (!res.ok) throw new Error('Failed to download thumbnail.');
+        const blob = await res.blob();
+        const blobUrl = window.URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = blobUrl;
+        a.download = `${safeTitle}.jpg`;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        setTimeout(() => window.URL.revokeObjectURL(blobUrl), 2000);
+      } else {
+        // Video / Audio High-Speed Download Trigger
+        const downloadUrl = `/api/proxy-download?id=${result.id}&quality=${encodeURIComponent(option.quality)}&type=${option.type}&filename=${encodeURIComponent(safeTitle)}&ext=${option.extension}`;
+        
+        // Trigger download via hidden iframe / direct anchor
+        const tempLink = document.createElement('a');
+        tempLink.href = downloadUrl;
+        tempLink.download = `${safeTitle}.${option.extension}`;
+        tempLink.target = '_blank';
+        document.body.appendChild(tempLink);
+        tempLink.click();
+        document.body.removeChild(tempLink);
       }
 
-      const blob = await response.blob();
-      const blobUrl = window.URL.createObjectURL(blob);
-      const tempLink = document.createElement('a');
-      tempLink.href = blobUrl;
-      tempLink.download = `${safeTitle}.${option.extension}`;
-      document.body.appendChild(tempLink);
-      tempLink.click();
-      document.body.removeChild(tempLink);
-      setTimeout(() => window.URL.revokeObjectURL(blobUrl), 2000);
+      // Record successful download count
+      onSuccessfulDownload();
+      setDownloadSuccessId(option.id);
+      setTimeout(() => setDownloadSuccessId(null), 3000);
     } catch (err: any) {
       console.error('Download error:', err);
-      setDownloadError(err?.message || 'Download failed. Please try an alternative resolution.');
+      setDownloadError(err?.message || 'Download could not start. Please try another resolution.');
     } finally {
       setDownloadingId(null);
     }
   };
-
-  const activeOption = useMemo(() => {
-    return result.downloads.find((d) => d.id === selectedDownloadId) || result.downloads[0];
-  }, [result.downloads, selectedDownloadId]);
 
   return (
     <div className="w-full max-w-4xl mx-auto bg-white dark:bg-zinc-900 rounded-3xl p-4 sm:p-7 shadow-2xl border border-zinc-200 dark:border-zinc-800 transition-all space-y-6">
@@ -142,12 +146,10 @@ export const ResultCard: React.FC<ResultCardProps> = ({ result, onDownloadAttemp
               </span>
             )}
 
-            {result.downloads.some((d) => d.quality.includes('2160p') || d.type === 'video_4k') && (
-              <span className="inline-flex items-center gap-1 text-[11px] font-extrabold uppercase tracking-wider px-2.5 py-0.5 rounded-full bg-amber-100 dark:bg-amber-950/80 text-amber-800 dark:text-amber-300 border border-amber-200 dark:border-amber-800 animate-pulse">
-                <Sparkles className="w-3 h-3" />
-                4K Ultra HD Available
-              </span>
-            )}
+            <span className="inline-flex items-center gap-1 text-[11px] font-extrabold uppercase tracking-wider px-2.5 py-0.5 rounded-full bg-amber-100 dark:bg-amber-950/80 text-amber-800 dark:text-amber-300 border border-amber-200 dark:border-amber-800">
+              <Sparkles className="w-3 h-3" />
+              4K Ultra HD & 1080p Ready
+            </span>
           </div>
 
           <h2 className="text-lg sm:text-xl font-bold text-zinc-900 dark:text-white line-clamp-2 leading-snug">
@@ -158,21 +160,11 @@ export const ResultCard: React.FC<ResultCardProps> = ({ result, onDownloadAttemp
             <span className="font-semibold text-zinc-800 dark:text-zinc-200">
               {result.author.name}
             </span>
-            {result.durationFormatted && (
-              <>
-                <span>•</span>
-                <span>{result.durationFormatted}</span>
-              </>
-            )}
-            {result.stats?.views !== undefined && result.stats.views > 0 && (
-              <>
-                <span>•</span>
-                <span className="flex items-center gap-1">
-                  <Eye className="w-3 h-3" />
-                  {formatNumber(result.stats.views)} views
-                </span>
-              </>
-            )}
+            <span>•</span>
+            <span className="text-emerald-500 font-semibold flex items-center gap-1">
+              <CheckCircle2 className="w-3.5 h-3.5" />
+              Direct Download Available
+            </span>
           </div>
         </div>
 
@@ -188,23 +180,39 @@ export const ResultCard: React.FC<ResultCardProps> = ({ result, onDownloadAttemp
 
       {/* Media Preview & Download Controls */}
       <div className="grid grid-cols-1 md:grid-cols-12 gap-6 items-start">
-        {/* Preview Thumbnail / Player (Responsive 9:16 or 16:9) */}
-        <div className={`md:col-span-5 relative rounded-2xl overflow-hidden bg-black shadow-lg border border-zinc-200 dark:border-zinc-800 ${result.isShorts ? 'aspect-[9/16] max-h-[460px] mx-auto' : 'aspect-video w-full'}`}>
-          <img
-            src={result.cover}
-            alt={result.title}
-            className="w-full h-full object-cover"
-          />
+        {/* Responsive Interactive Video Player Preview (9:16 Shorts or 16:9 Landscape) */}
+        <div className={`md:col-span-5 relative rounded-2xl overflow-hidden bg-black shadow-lg border border-zinc-200 dark:border-zinc-800 ${result.isShorts ? 'aspect-[9/16] max-h-[440px] mx-auto w-full max-w-[260px]' : 'aspect-video w-full'}`}>
+          {isPlayingVideo ? (
+            <iframe
+              src={`https://www.youtube-nocookie.com/embed/${result.id}?autoplay=1&rel=0&modestbranding=1`}
+              title={result.title}
+              allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
+              allowFullScreen
+              className="w-full h-full border-0"
+            />
+          ) : (
+            <div className="relative w-full h-full group cursor-pointer" onClick={() => setIsPlayingVideo(true)}>
+              <img
+                src={result.cover}
+                alt={result.title}
+                className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
+              />
+              <div className="absolute inset-0 bg-black/35 flex items-center justify-center group-hover:bg-black/50 transition-colors">
+                <button
+                  id="play-video-preview-btn"
+                  className="w-14 h-14 rounded-full bg-red-600 hover:bg-red-700 text-white flex items-center justify-center shadow-xl hover:scale-110 active:scale-95 transition-all cursor-pointer"
+                  title="Click to Play Video"
+                >
+                  <Play className="w-6 h-6 fill-white translate-x-0.5" />
+                </button>
+              </div>
 
-          <a
-            href={result.originalUrl}
-            target="_blank"
-            rel="noreferrer"
-            className="absolute bottom-2.5 left-2.5 inline-flex items-center gap-1 text-[10px] font-semibold text-white bg-black/60 hover:bg-black/80 backdrop-blur-md px-2 py-1 rounded-lg transition-colors"
-          >
-            <ExternalLink className="w-3 h-3" />
-            <span>Open on YouTube</span>
-          </a>
+              <span className="absolute bottom-2.5 left-2.5 inline-flex items-center gap-1 text-[10px] font-semibold text-white bg-black/70 backdrop-blur-md px-2 py-1 rounded-lg">
+                <Play className="w-3 h-3 fill-white" />
+                <span>Click to Play</span>
+              </span>
+            </div>
+          )}
         </div>
 
         {/* Resolution Selector & Download Options */}
@@ -222,6 +230,7 @@ export const ResultCard: React.FC<ResultCardProps> = ({ result, onDownloadAttemp
             {result.downloads.map((option) => {
               const isSelected = selectedDownloadId === option.id;
               const isDownloading = downloadingId === option.id;
+              const isSuccess = downloadSuccessId === option.id;
 
               return (
                 <div
@@ -269,13 +278,29 @@ export const ResultCard: React.FC<ResultCardProps> = ({ result, onDownloadAttemp
                     }}
                     disabled={isDownloading}
                     className={`inline-flex items-center justify-center gap-1.5 px-3.5 py-2 rounded-xl text-xs font-bold transition-all shrink-0 cursor-pointer shadow-sm ${
-                      option.recommend || isSelected
+                      isSuccess
+                        ? 'bg-emerald-600 text-white'
+                        : option.recommend || isSelected
                         ? 'bg-gradient-to-r from-red-600 to-rose-600 hover:from-red-700 hover:to-rose-700 text-white shadow-red-600/20'
                         : 'bg-zinc-900 dark:bg-zinc-100 hover:bg-zinc-800 dark:hover:bg-zinc-200 text-white dark:text-zinc-900'
                     }`}
                   >
-                    <Download className="w-3.5 h-3.5" />
-                    <span>{isDownloading ? 'Downloading...' : 'Save'}</span>
+                    {isDownloading ? (
+                      <>
+                        <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                        <span>Saving...</span>
+                      </>
+                    ) : isSuccess ? (
+                      <>
+                        <Check className="w-3.5 h-3.5" />
+                        <span>Saved!</span>
+                      </>
+                    ) : (
+                      <>
+                        <Download className="w-3.5 h-3.5" />
+                        <span>Save</span>
+                      </>
+                    )}
                   </button>
                 </div>
               );
@@ -291,7 +316,7 @@ export const ResultCard: React.FC<ResultCardProps> = ({ result, onDownloadAttemp
               </span>
               <button
                 onClick={() => setCustomFilename(presetCreatorCaption)}
-                className="text-[11px] text-red-600 dark:text-red-400 hover:underline flex items-center gap-1"
+                className="text-[11px] text-red-600 dark:text-red-400 hover:underline flex items-center gap-1 cursor-pointer"
                 title="Reset to default title"
               >
                 <RotateCcw className="w-3 h-3" />

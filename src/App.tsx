@@ -51,16 +51,16 @@ export default function App() {
   const [isAuthModalOpen, setIsAuthModalOpen] = useState(false);
   const [authReason, setAuthReason] = useState<'limit_reached' | 'manual'>('manual');
   
-  // Theme state: default to light mode unless saved in localStorage
+  // Theme state: default to dark mode or saved preference
   const [isDarkMode, setIsDarkMode] = useState<boolean>(() => {
     try {
       const savedTheme = localStorage.getItem(THEME_KEY);
       if (savedTheme) {
         return savedTheme === 'dark';
       }
-      return false;
+      return true;
     } catch {
-      return false;
+      return true;
     }
   });
 
@@ -149,8 +149,8 @@ export default function App() {
     setIsAuthModalOpen(true);
   };
 
-  // Intercept downloads for quota enforcement
-  const handleDownloadAttempt = (): boolean => {
+  // Check quota before downloading
+  const canDownload = (): boolean => {
     if (user) {
       return true;
     }
@@ -160,6 +160,12 @@ export default function App() {
       return false;
     }
 
+    return true;
+  };
+
+  // Only increment quota after successful download start
+  const handleSuccessfulDownload = () => {
+    if (user) return;
     const nextCount = downloadCount + 1;
     setDownloadCount(nextCount);
     try {
@@ -167,7 +173,6 @@ export default function App() {
     } catch (e) {
       console.warn('Could not save download count:', e);
     }
-    return true;
   };
 
   const handleExtract = async (targetUrl: string) => {
@@ -276,7 +281,8 @@ export default function App() {
           <section id="extraction-result-section" className="py-4 sm:py-8 px-3 sm:px-6">
             <ResultCard
               result={result}
-              onDownloadAttempt={handleDownloadAttempt}
+              canDownload={canDownload}
+              onSuccessfulDownload={handleSuccessfulDownload}
             />
           </section>
         )}

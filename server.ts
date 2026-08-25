@@ -34,18 +34,6 @@ function formatBytes(bytes?: number): string | undefined {
   return `${(bytes / Math.pow(1024, i)).toFixed(1)} ${sizes[i]}`;
 }
 
-// Format duration in seconds to MM:SS or HH:MM:SS
-function formatDuration(seconds: number): string {
-  if (!seconds || seconds <= 0) return '0:00';
-  const hrs = Math.floor(seconds / 3600);
-  const mins = Math.floor((seconds % 3600) / 60);
-  const secs = Math.floor(seconds % 60);
-  if (hrs > 0) {
-    return `${hrs}:${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
-  }
-  return `${mins}:${secs.toString().padStart(2, '0')}`;
-}
-
 // Sanitize filename for download
 function sanitizeFilename(name: string): string {
   const cleaned = name
@@ -133,11 +121,6 @@ async function extractYouTubeMedia(targetUrl: string) {
   // 2. Build Multi-Resolution Download Streams
   const downloads: any[] = [];
 
-  // Stream Resolution Endpoints (High-reliability YouTube download mirror stream)
-  // Generates dedicated stream URLs for each resolution
-  const streamBaseUrl = `https://tube-stream.funnelfluxassets.workers.dev/api/stream?id=${videoId}`;
-  const directFallback = `https://i.ytimg.com/vi/${videoId}/maxresdefault.jpg`;
-
   // 1. 4K Ultra HD (2160p)
   downloads.push({
     id: 'yt_4k_2160p',
@@ -147,7 +130,7 @@ async function extractYouTubeMedia(targetUrl: string) {
     description: 'Maximum resolution 4K Ultra HD video stream with HDR visuals',
     badge: '4K ULTRA HD',
     type: 'video_4k',
-    url: `${streamBaseUrl}&quality=2160p`,
+    url: videoId,
     extension: 'mp4',
     hasAudio: true,
     recommend: false,
@@ -162,7 +145,7 @@ async function extractYouTubeMedia(targetUrl: string) {
     description: 'High-definition 1440p QHD format for large screens',
     badge: '2K QHD',
     type: 'video_2k',
-    url: `${streamBaseUrl}&quality=1440p`,
+    url: videoId,
     extension: 'mp4',
     hasAudio: true,
     recommend: false,
@@ -177,7 +160,7 @@ async function extractYouTubeMedia(targetUrl: string) {
     description: 'Crystal-clear 1080p Full HD MP4 with synchronized audio',
     badge: '1080p FULL HD',
     type: 'video_1080p',
-    url: `${streamBaseUrl}&quality=1080p`,
+    url: videoId,
     extension: 'mp4',
     hasAudio: true,
     recommend: true,
@@ -192,7 +175,7 @@ async function extractYouTubeMedia(targetUrl: string) {
     description: 'Standard HD MP4 format for fast mobile & desktop saving',
     badge: '720p HD',
     type: 'video_720p',
-    url: `${streamBaseUrl}&quality=720p`,
+    url: videoId,
     extension: 'mp4',
     hasAudio: true,
     recommend: false,
@@ -207,7 +190,7 @@ async function extractYouTubeMedia(targetUrl: string) {
     description: 'Compact file size for quick messaging and sharing',
     badge: 'Standard MP4',
     type: 'video_360p',
-    url: `${streamBaseUrl}&quality=360p`,
+    url: videoId,
     extension: 'mp4',
     hasAudio: true,
     recommend: false,
@@ -221,7 +204,7 @@ async function extractYouTubeMedia(targetUrl: string) {
     description: 'Extract and save speech, song, or background sound in MP3',
     badge: 'MP3 AUDIO',
     type: 'audio',
-    url: `${streamBaseUrl}&quality=audio`,
+    url: videoId,
     extension: 'mp3',
     recommend: false,
   });
@@ -284,72 +267,53 @@ app.post('/api/extract', async (req, res) => {
 });
 
 // API 2: Proxy Download with Attachment Headers
-// Prompts immediate file download directly to user's device
+// Handles direct thumbnail downloads and routes video/audio downloads directly to browser
 app.get('/api/proxy-download', async (req, res) => {
   try {
-    const { url, filename, ext } = req.query;
-    if (!url || typeof url !== 'string') {
-      return res.status(400).json({ error: 'Missing target URL parameter' });
-    }
+    const { url, id, quality, type, filename, ext } = req.query;
 
-    const targetUrl = url.trim();
-    const safeFilename = sanitizeFilename(typeof filename === 'string' ? filename : 'youtube_download');
-    let fileExt = typeof ext === 'string' ? ext.replace('.', '').toLowerCase() : 'mp4';
+    const safeFilename = sanitizeFilename(typeof filename === 'string' ? filename : 'youtube_media');
+    const fileExt = typeof ext === 'string' ? ext.replace('.', '').toLowerCase() : 'mp4';
 
-    // Handle direct image thumbnails (i.ytimg.com)
-    if (targetUrl.includes('ytimg.com') || targetUrl.endsWith('.jpg') || targetUrl.endsWith('.png')) {
-      const imgRes = await fetch(targetUrl);
+    // 1. Direct Thumbnail Image Download
+    if (typeof url === 'string' && url.trim()) {
+      const targetUrl = url.trim();
+      const imgRes = await fetch(targetUrl, {
+        headers: {
+          'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
+          Referer: 'https://www.youtube.com/',
+        }
+      });
+
       if (imgRes.ok) {
         const buffer = await imgRes.arrayBuffer();
         res.setHeader('Content-Disposition', `attachment; filename="${safeFilename}.jpg"`);
         res.setHeader('Content-Type', 'image/jpeg');
+        res.setHeader('Cache-Control', 'public, max-age=86400');
         return res.end(Buffer.from(buffer));
       }
     }
 
-    const response = await fetch(targetUrl, {
-      headers: {
-        'User-Agent':
-          'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
-        Accept: '*/*',
-        Referer: 'https://www.youtube.com/',
-      },
-    }).catch(() => null);
-
-    if (response && response.ok) {
-      const upstreamContentType = response.headers.get('content-type') || '';
-      if (upstreamContentType.includes('audio/mpeg') || upstreamContentType.includes('audio/mp3')) {
-        fileExt = 'mp3';
-      } else if (upstreamContentType.includes('video/mp4')) {
-        fileExt = 'mp4';
-      }
-
-      res.setHeader('Content-Disposition', `attachment; filename="${safeFilename}.${fileExt}"`);
-      res.setHeader('Content-Type', upstreamContentType || (fileExt === 'mp3' ? 'audio/mpeg' : 'video/mp4'));
-      res.setHeader('Cache-Control', 'public, max-age=3600');
-
-      if (response.body) {
-        const reader = response.body.getReader();
-        while (true) {
-          const { done, value } = await reader.read();
-          if (done) {
-            res.end();
-            break;
-          }
-          res.write(Buffer.from(value));
-        }
-      } else {
-        const buffer = await response.arrayBuffer();
-        res.end(Buffer.from(buffer));
-      }
-    } else {
-      // Direct redirect fallback if stream proxy is busy
-      return res.redirect(targetUrl);
+    // 2. Video & Audio Direct Download Gateway
+    const videoId = typeof id === 'string' && id.trim() ? id.trim() : (typeof url === 'string' ? parseYouTubeUrl(url)?.videoId : '');
+    if (!videoId) {
+      return res.status(400).json({ error: 'Missing video identifier.' });
     }
+
+    // High-speed converter stream target
+    const isAudio = type === 'audio' || fileExt === 'mp3';
+    const targetQuality = typeof quality === 'string' ? quality : (isAudio ? 'mp3' : '1080');
+
+    // Route to direct fast download service with attachment header
+    const directGatewayUrl = isAudio
+      ? `https://api.mp3youtube.cc/v2/converter?id=${videoId}&format=mp3`
+      : `https://api.mp3youtube.cc/v2/converter?id=${videoId}&format=mp4&quality=${targetQuality.includes('2160') ? '2160' : targetQuality.includes('1440') ? '1440' : targetQuality.includes('1080') ? '1080' : '720'}`;
+
+    return res.redirect(directGatewayUrl);
   } catch (err: any) {
-    console.error('Download stream error:', err);
+    console.error('Download proxy error:', err);
     if (!res.headersSent) {
-      res.status(500).json({ error: 'Failed to process media download stream' });
+      res.status(500).json({ error: 'Failed to initiate media download.' });
     }
   }
 });
