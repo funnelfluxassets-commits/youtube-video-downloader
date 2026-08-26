@@ -211,7 +211,7 @@ app.get('/api/debug', async (req, res) => {
     try {
       const { stdout, stderr } = await execFileAsync(
         info.ytdlpBin,
-        ['-g', '-f', 'bestvideo[height<=720][ext=mp4]/bestvideo[height<=720]', '--no-playlist',
+        ['-g', '-f', 'bestvideo[height<=720][ext=mp4]/bestvideo[height<=720]', '--no-playlist', '--js-runtimes', 'node',
          `https://www.youtube.com/watch?v=${testId}`],
         { timeout: 30000 }
       );
@@ -318,7 +318,7 @@ app.get('/api/proxy-download', async (req, res) => {
     try {
       const { stdout } = await execFileAsync(
         ytdlpBin,
-        ['-g', '-f', formatSelector, '--no-playlist', ytUrl],
+        ['-g', '-f', formatSelector, '--no-playlist', '--js-runtimes', 'node', ytUrl],
         { timeout: 30000 }
       );
       directStreamUrl = stdout.trim().split('\n')[0].trim();
@@ -330,7 +330,7 @@ app.get('/api/proxy-download', async (req, res) => {
         const fallbackFmt = isAudio ? 'bestaudio' : 'bestvideo[ext=mp4]/best[ext=mp4]/best';
         const { stdout } = await execFileAsync(
           ytdlpBin,
-          ['-g', '-f', fallbackFmt, '--no-playlist', ytUrl],
+          ['-g', '-f', fallbackFmt, '--no-playlist', '--js-runtimes', 'node', ytUrl],
           { timeout: 30000 }
         );
         directStreamUrl = stdout.trim().split('\n')[0].trim();
