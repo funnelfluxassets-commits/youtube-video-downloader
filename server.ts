@@ -95,6 +95,27 @@ async function ensureYtDlp(): Promise<string> {
   return ytdlpSetupPromise;
 }
 
+// ─── YouTube Cookies (bypass "sign in to confirm you're not a bot") ───────────
+// YouTube blocks datacenter IPs. Providing browser cookies proves it's a real session.
+const COOKIES_PATH = '/tmp/yt-cookies.txt';
+
+function ensureCookiesFile(): string[] {
+  const cookiesEnv = process.env.YOUTUBE_COOKIES;
+  if (!cookiesEnv) return [];
+
+  try {
+    // Write cookies to file if not already done
+    if (!fs.existsSync(COOKIES_PATH)) {
+      fs.writeFileSync(COOKIES_PATH, cookiesEnv.replace(/\\n/g, '\n'), 'utf-8');
+      console.log('[yt-dlp] YouTube cookies written to', COOKIES_PATH);
+    }
+    return ['--cookies', COOKIES_PATH];
+  } catch (err: any) {
+    console.warn('[yt-dlp] Failed to write cookies:', err?.message);
+    return [];
+  }
+}
+
 // Pre-warm yt-dlp on startup so first download is fast
 ensureYtDlp().catch((e) => console.warn('[yt-dlp] Setup warning:', e?.message));
 
@@ -207,11 +228,15 @@ app.get('/api/debug', async (req, res) => {
 
   // Test stream URL extraction if video ID provided
   const testId = (req.query.id as string) || '0FnBozdvWg8';
+  const cookieArgs = ensureCookiesFile();
+  info.hasCookies = cookieArgs.length > 0;
+  info.cookiesEnvSet = !!process.env.YOUTUBE_COOKIES;
   if (info.ytdlpBin) {
     try {
       const { stdout, stderr } = await execFileAsync(
         info.ytdlpBin,
         ['-g', '-f', 'bestvideo[height<=720][ext=mp4]/bestvideo[height<=720]', '--no-playlist', '--js-runtimes', 'node',
+         ...cookieArgs,
          `https://www.youtube.com/watch?v=${testId}`],
         { timeout: 30000 }
       );
@@ -315,10 +340,11 @@ app.get('/api/proxy-download', async (req, res) => {
     // Resolve direct GoogleVideo CDN stream URL
     let directStreamUrl = '';
     let lastError = '';
+    const cookieArgs = ensureCookiesFile();
     try {
       const { stdout } = await execFileAsync(
         ytdlpBin,
-        ['-g', '-f', formatSelector, '--no-playlist', '--js-runtimes', 'node', ytUrl],
+        ['-g', '-f', formatSelector, '--no-playlist', '--js-runtimes', 'node', ...cookieArgs, ytUrl],
         { timeout: 30000 }
       );
       directStreamUrl = stdout.trim().split('\n')[0].trim();
@@ -330,7 +356,7 @@ app.get('/api/proxy-download', async (req, res) => {
         const fallbackFmt = isAudio ? 'bestaudio' : 'bestvideo[ext=mp4]/best[ext=mp4]/best';
         const { stdout } = await execFileAsync(
           ytdlpBin,
-          ['-g', '-f', fallbackFmt, '--no-playlist', '--js-runtimes', 'node', ytUrl],
+          ['-g', '-f', fallbackFmt, '--no-playlist', '--js-runtimes', 'node', ...cookieArgs, ytUrl],
           { timeout: 30000 }
         );
         directStreamUrl = stdout.trim().split('\n')[0].trim();
