@@ -2,7 +2,6 @@ import 'dotenv/config';
 import express from 'express';
 import path from 'path';
 import fs from 'fs';
-import https from 'https';
 import { execFile, exec } from 'child_process';
 import util from 'util';
 import { initializeApp, cert } from 'firebase-admin';
@@ -38,35 +37,21 @@ app.use(express.json());
 // Locally: use the system yt-dlp from PATH
 
 const YTDLP_TMP_PATH = '/tmp/yt-dlp';
+// MUST use yt-dlp_linux (standalone binary) NOT yt-dlp (Python ZIP).
+// The standalone binary bundles Python + all deps inside (~38MB).
+// The Python ZIP only works if Python 3.10+ is installed (Vercel Lambda has no Python).
 const YTDLP_DOWNLOAD_URL =
-  'https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp';
+  'https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp_linux';
 
 let ytdlpReadyPath: string | null = null;
 let ytdlpSetupPromise: Promise<string> | null = null;
 
 async function downloadFile(url: string, dest: string): Promise<void> {
-  return new Promise((resolve, reject) => {
-    const file = fs.createWriteStream(dest);
-    const request = https.get(url, (res) => {
-      if (res.statusCode === 301 || res.statusCode === 302) {
-        // Follow redirect
-        file.close();
-        fs.unlinkSync(dest);
-        downloadFile(res.headers.location!, dest).then(resolve).catch(reject);
-        return;
-      }
-      if (res.statusCode !== 200) {
-        reject(new Error(`HTTP ${res.statusCode} downloading yt-dlp`));
-        return;
-      }
-      res.pipe(file);
-      file.on('finish', () => file.close(() => resolve()));
-    });
-    request.on('error', (err) => {
-      fs.unlink(dest, () => {});
-      reject(err);
-    });
-  });
+  // fetch() automatically follows all redirects (GitHub uses 301→302→200)
+  const res = await fetch(url, { redirect: 'follow' });
+  if (!res.ok) throw new Error(`HTTP ${res.status} downloading yt-dlp`);
+  const buffer = Buffer.from(await res.arrayBuffer());
+  fs.writeFileSync(dest, buffer);
 }
 
 async function ensureYtDlp(): Promise<string> {
@@ -87,7 +72,7 @@ async function ensureYtDlp(): Promise<string> {
     // 2. Try /tmp/yt-dlp if already downloaded
     if (fs.existsSync(YTDLP_TMP_PATH)) {
       try {
-        const { stdout } = await execFileAsync(YTDLP_TMP_PATH, ['--version'], { timeout: 5000 });
+        const { stdout } = await execFileAsync(YTDLP_TMP_PATH, ['--version'], { timeout: 15000 });
         console.log('[yt-dlp] Using cached /tmp/yt-dlp', stdout.trim());
         ytdlpReadyPath = YTDLP_TMP_PATH;
         return YTDLP_TMP_PATH;
@@ -101,7 +86,7 @@ async function ensureYtDlp(): Promise<string> {
     await downloadFile(YTDLP_DOWNLOAD_URL, YTDLP_TMP_PATH);
     fs.chmodSync(YTDLP_TMP_PATH, '755');
 
-    const { stdout: version } = await execFileAsync(YTDLP_TMP_PATH, ['--version'], { timeout: 10000 });
+    const { stdout: version } = await execFileAsync(YTDLP_TMP_PATH, ['--version'], { timeout: 20000 });
     console.log('[yt-dlp] Downloaded & verified:', version.trim());
     ytdlpReadyPath = YTDLP_TMP_PATH;
     return YTDLP_TMP_PATH;
@@ -275,11 +260,11 @@ app.get('/api/proxy-download', async (req, res) => {
     try {
       ytdlpBin = await Promise.race([
         ensureYtDlp(),
-        new Promise<never>((_, reject) => setTimeout(() => reject(new Error('yt-dlp setup timeout')), 25000)),
+        new Promise<never>((_, reject) => setTimeout(() => reject(new Error('yt-dlp setup timeout')), 50000)),
       ]);
     } catch (setupErr: any) {
       console.error('[yt-dlp] Setup failed:', setupErr?.message);
-      return res.status(503).json({ error: 'Download service is initialising. Please try again in 10 seconds.' });
+      return res.status(503).json({ error: 'Download service is starting up. Please wait 30 seconds and try again.' });
     }
 
     // Resolve direct GoogleVideo CDN stream URL
