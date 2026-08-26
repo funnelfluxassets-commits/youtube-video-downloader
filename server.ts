@@ -182,6 +182,51 @@ async function extractYouTubeMedia(targetUrl: string) {
     extractedAt: Date.now(),
   };
 }
+// ─── API: /api/debug — Diagnostic endpoint ──────────────────────────────────
+
+app.get('/api/debug', async (req, res) => {
+  const info: any = {
+    platform: process.platform,
+    arch: process.arch,
+    nodeVersion: process.version,
+    cwd: process.cwd(),
+    tmpExists: fs.existsSync('/tmp'),
+    ytdlpTmpExists: fs.existsSync(YTDLP_TMP_PATH),
+    ytdlpReadyPath,
+  };
+
+  try {
+    const bin = await ensureYtDlp();
+    info.ytdlpBin = bin;
+    const { stdout } = await execFileAsync(bin, ['--version'], { timeout: 15000 });
+    info.ytdlpVersion = stdout.trim();
+  } catch (e: any) {
+    info.ytdlpError = e?.message?.slice(0, 300);
+    info.ytdlpStderr = e?.stderr?.slice(0, 300);
+  }
+
+  // Test stream URL extraction if video ID provided
+  const testId = (req.query.id as string) || '0FnBozdvWg8';
+  if (info.ytdlpBin) {
+    try {
+      const { stdout, stderr } = await execFileAsync(
+        info.ytdlpBin,
+        ['-g', '-f', 'bestvideo[height<=720][ext=mp4]/bestvideo[height<=720]', '--no-playlist',
+         `https://www.youtube.com/watch?v=${testId}`],
+        { timeout: 30000 }
+      );
+      info.testStreamUrl = stdout.trim().split('\n')[0]?.slice(0, 100) + '...';
+      info.testStderr = stderr?.slice(0, 200);
+      info.testSuccess = true;
+    } catch (e: any) {
+      info.testSuccess = false;
+      info.testError = e?.message?.slice(0, 300);
+      info.testStderr = e?.stderr?.slice(0, 300);
+    }
+  }
+
+  return res.json(info);
+});
 
 // ─── API: /api/extract ────────────────────────────────────────────────────────
 
@@ -269,6 +314,7 @@ app.get('/api/proxy-download', async (req, res) => {
 
     // Resolve direct GoogleVideo CDN stream URL
     let directStreamUrl = '';
+    let lastError = '';
     try {
       const { stdout } = await execFileAsync(
         ytdlpBin,
@@ -278,7 +324,8 @@ app.get('/api/proxy-download', async (req, res) => {
       directStreamUrl = stdout.trim().split('\n')[0].trim();
       console.log('[yt-dlp] Resolved stream URL for', videoId, qualityStr);
     } catch (execErr: any) {
-      console.warn('[yt-dlp] Primary selector failed, trying best:', execErr?.message?.slice(0, 100));
+      lastError = (execErr?.stderr || execErr?.message || 'unknown error').slice(0, 300);
+      console.warn('[yt-dlp] Primary selector failed:', lastError);
       try {
         const fallbackFmt = isAudio ? 'bestaudio' : 'bestvideo[ext=mp4]/best[ext=mp4]/best';
         const { stdout } = await execFileAsync(
@@ -288,12 +335,13 @@ app.get('/api/proxy-download', async (req, res) => {
         );
         directStreamUrl = stdout.trim().split('\n')[0].trim();
       } catch (fallbackErr: any) {
-        console.error('[yt-dlp] All selectors failed:', fallbackErr?.message?.slice(0, 100));
+        lastError = (fallbackErr?.stderr || fallbackErr?.message || 'unknown error').slice(0, 300);
+        console.error('[yt-dlp] All selectors failed:', lastError);
       }
     }
 
     if (!directStreamUrl || !directStreamUrl.startsWith('http')) {
-      return res.status(500).json({ error: 'Could not resolve media stream. The video may be unavailable or region-locked.' });
+      return res.status(500).json({ error: 'Could not resolve media stream.', detail: lastError });
     }
 
     // Stream Google CDN directly to user with attachment header

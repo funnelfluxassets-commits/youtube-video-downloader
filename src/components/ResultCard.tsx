@@ -99,7 +99,10 @@ export const ResultCard: React.FC<ResultCardProps> = ({ result, canDownload, onS
       const response = await fetch(endpoint);
       if (!response.ok) {
         const errorJson = await response.json().catch(() => null);
-        throw new Error(errorJson?.error || `Server returned error status ${response.status}`);
+        const msg = errorJson?.detail
+          ? `${errorJson.error} (${errorJson.detail})`
+          : errorJson?.error || `Server returned error status ${response.status}`;
+        throw new Error(msg);
       }
 
       const blob = await response.blob();
