@@ -98,16 +98,25 @@ async function ensureYtDlp(): Promise<string> {
 // ─── YouTube Cookies (bypass "sign in to confirm you're not a bot") ───────────
 // YouTube blocks datacenter IPs. Providing browser cookies proves it's a real session.
 const COOKIES_PATH = '/tmp/yt-cookies.txt';
+let cookiesWritten = false;
 
 function ensureCookiesFile(): string[] {
   const cookiesEnv = process.env.YOUTUBE_COOKIES;
   if (!cookiesEnv) return [];
 
   try {
-    // Write cookies to file if not already done
-    if (!fs.existsSync(COOKIES_PATH)) {
-      fs.writeFileSync(COOKIES_PATH, cookiesEnv.replace(/\\n/g, '\n'), 'utf-8');
-      console.log('[yt-dlp] YouTube cookies written to', COOKIES_PATH);
+    // Always write fresh on each Lambda cold start
+    if (!cookiesWritten) {
+      // Handle both real newlines and escaped \n from env var
+      let content = cookiesEnv;
+      if (!content.includes('\n')) {
+        // Env var has literal backslash-n, convert to real newlines
+        content = content.split('\\n').join('\n');
+      }
+      fs.writeFileSync(COOKIES_PATH, content, 'utf-8');
+      cookiesWritten = true;
+      const lines = content.split('\n').filter(l => l.trim() && !l.startsWith('#')).length;
+      console.log('[yt-dlp] Cookies written:', COOKIES_PATH, '- data lines:', lines, 'size:', content.length);
     }
     return ['--cookies', COOKIES_PATH];
   } catch (err: any) {
@@ -367,7 +376,13 @@ app.get('/api/proxy-download', async (req, res) => {
     }
 
     if (!directStreamUrl || !directStreamUrl.startsWith('http')) {
-      return res.status(500).json({ error: 'Could not resolve media stream.', detail: lastError });
+      const cookieFileExists = fs.existsSync(COOKIES_PATH);
+      const cookieFileSize = cookieFileExists ? fs.statSync(COOKIES_PATH).size : 0;
+      return res.status(500).json({
+        error: 'Could not resolve media stream.',
+        detail: lastError,
+        debug: { cookieArgs: cookieArgs.length, cookieFileExists, cookieFileSize, ytdlpBin, formatSelector }
+      });
     }
 
     // Stream Google CDN directly to user with attachment header
