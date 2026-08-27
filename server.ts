@@ -2,6 +2,7 @@ import 'dotenv/config';
 import express from 'express';
 import path from 'path';
 import fs from 'fs';
+import zlib from 'zlib';
 import { execFile, exec } from 'child_process';
 import util from 'util';
 import { initializeApp, cert } from 'firebase-admin';
@@ -37,9 +38,6 @@ app.use(express.json());
 // Locally: use the system yt-dlp from PATH
 
 const YTDLP_TMP_PATH = '/tmp/yt-dlp';
-// MUST use yt-dlp_linux (standalone binary) NOT yt-dlp (Python ZIP).
-// The standalone binary bundles Python + all deps inside (~38MB).
-// The Python ZIP only works if Python 3.10+ is installed (Vercel Lambda has no Python).
 const YTDLP_DOWNLOAD_URL =
   'https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp_linux';
 
@@ -47,7 +45,6 @@ let ytdlpReadyPath: string | null = null;
 let ytdlpSetupPromise: Promise<string> | null = null;
 
 async function downloadFile(url: string, dest: string): Promise<void> {
-  // fetch() automatically follows all redirects (GitHub uses 301→302→200)
   const res = await fetch(url, { redirect: 'follow' });
   if (!res.ok) throw new Error(`HTTP ${res.status} downloading yt-dlp`);
   const buffer = Buffer.from(await res.arrayBuffer());
@@ -77,7 +74,7 @@ async function ensureYtDlp(): Promise<string> {
         ytdlpReadyPath = YTDLP_TMP_PATH;
         return YTDLP_TMP_PATH;
       } catch {
-        fs.unlinkSync(YTDLP_TMP_PATH);
+        try { fs.unlinkSync(YTDLP_TMP_PATH); } catch {}
       }
     }
 
@@ -95,8 +92,74 @@ async function ensureYtDlp(): Promise<string> {
   return ytdlpSetupPromise;
 }
 
+// ─── FFmpeg Binary Management ────────────────────────────────────────────────
+// Required for merging high-res video streams + audio streams into standard MP4s
+const FFMPEG_TMP_PATH = '/tmp/ffmpeg';
+const FFMPEG_LINUX_URL =
+  'https://github.com/eugeneware/ffmpeg-static/releases/download/b6.1.1/ffmpeg-linux-x64.gz';
+
+let ffmpegReadyPath: string | null = null;
+let ffmpegSetupPromise: Promise<string> | null = null;
+
+async function ensureFfmpeg(): Promise<string> {
+  if (ffmpegReadyPath) return ffmpegReadyPath;
+  if (ffmpegSetupPromise) return ffmpegSetupPromise;
+
+  ffmpegSetupPromise = (async () => {
+    // 1. Try system ffmpeg in PATH (works locally on Mac/Linux)
+    try {
+      await execAsync('ffmpeg -version', { timeout: 5000 });
+      console.log('[ffmpeg] Using system ffmpeg');
+      ffmpegReadyPath = 'ffmpeg';
+      return 'ffmpeg';
+    } catch {
+      console.log('[ffmpeg] System ffmpeg not found, checking alternatives...');
+    }
+
+    // 2. Try ffmpeg-static package if installed
+    try {
+      const ffmpegStaticPkg = (await import('ffmpeg-static')).default;
+      if (ffmpegStaticPkg && fs.existsSync(ffmpegStaticPkg)) {
+        console.log('[ffmpeg] Using ffmpeg-static package path:', ffmpegStaticPkg);
+        ffmpegReadyPath = ffmpegStaticPkg;
+        return ffmpegStaticPkg;
+      }
+    } catch (e: any) {
+      console.log('[ffmpeg] ffmpeg-static package check:', e?.message);
+    }
+
+    // 3. Try /tmp/ffmpeg if already cached
+    if (fs.existsSync(FFMPEG_TMP_PATH)) {
+      try {
+        await execFileAsync(FFMPEG_TMP_PATH, ['-version'], { timeout: 5000 });
+        console.log('[ffmpeg] Using cached /tmp/ffmpeg');
+        ffmpegReadyPath = FFMPEG_TMP_PATH;
+        return FFMPEG_TMP_PATH;
+      } catch {
+        try { fs.unlinkSync(FFMPEG_TMP_PATH); } catch {}
+      }
+    }
+
+    // 4. Download and gunzip static ffmpeg to /tmp/ffmpeg (Vercel Linux x64)
+    console.log('[ffmpeg] Downloading static ffmpeg to /tmp/ffmpeg...');
+    const res = await fetch(FFMPEG_LINUX_URL, { redirect: 'follow' });
+    if (!res.ok) throw new Error(`HTTP ${res.status} downloading ffmpeg`);
+    const arrayBuffer = await res.arrayBuffer();
+    const buffer = Buffer.from(arrayBuffer);
+    const uncompressed = zlib.gunzipSync(buffer);
+    fs.writeFileSync(FFMPEG_TMP_PATH, uncompressed);
+    fs.chmodSync(FFMPEG_TMP_PATH, '755');
+
+    await execFileAsync(FFMPEG_TMP_PATH, ['-version'], { timeout: 10000 });
+    console.log('[ffmpeg] Downloaded & verified /tmp/ffmpeg');
+    ffmpegReadyPath = FFMPEG_TMP_PATH;
+    return FFMPEG_TMP_PATH;
+  })();
+
+  return ffmpegSetupPromise;
+}
+
 // ─── YouTube Cookies (bypass "sign in to confirm you're not a bot") ───────────
-// YouTube blocks datacenter IPs. Providing browser cookies proves it's a real session.
 const COOKIES_PATH = '/tmp/yt-cookies.txt';
 let cookiesWritten = false;
 
@@ -105,17 +168,14 @@ function ensureCookiesFile(): string[] {
   if (!cookiesEnv) return [];
 
   try {
-    // Always write fresh on each Lambda cold start
     if (!cookiesWritten) {
-      // Handle both real newlines and escaped \n from env var
       let content = cookiesEnv;
       if (!content.includes('\n')) {
-        // Env var has literal backslash-n, convert to real newlines
         content = content.split('\\n').join('\n');
       }
       fs.writeFileSync(COOKIES_PATH, content, 'utf-8');
       cookiesWritten = true;
-      const lines = content.split('\n').filter(l => l.trim() && !l.startsWith('#')).length;
+      const lines = content.split('\n').filter((l) => l.trim() && !l.startsWith('#')).length;
       console.log('[yt-dlp] Cookies written:', COOKIES_PATH, '- data lines:', lines, 'size:', content.length);
     }
     return ['--cookies', COOKIES_PATH];
@@ -125,8 +185,9 @@ function ensureCookiesFile(): string[] {
   }
 }
 
-// Pre-warm yt-dlp on startup so first download is fast
+// Pre-warm yt-dlp and ffmpeg on startup so first download is fast
 ensureYtDlp().catch((e) => console.warn('[yt-dlp] Setup warning:', e?.message));
+ensureFfmpeg().catch((e) => console.warn('[ffmpeg] Setup warning:', e?.message));
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -187,12 +248,12 @@ async function extractYouTubeMedia(targetUrl: string) {
   } catch { /* non-fatal */ }
 
   const downloads: any[] = [
-    { id: 'yt_4k_2160p',   label: '4K Ultra HD (2160p)',           quality: '2160', description: 'Maximum resolution 4K Ultra HD video',               badge: '4K ULTRA HD',  type: 'video', url: videoId, extension: 'mp4', recommend: false },
-    { id: 'yt_2k_1440p',   label: '2K Quad HD (1440p)',            quality: '1440', description: '1440p QHD format for large screens',                  badge: '2K QHD',       type: 'video', url: videoId, extension: 'mp4', recommend: false },
-    { id: 'yt_1080p_fhd',  label: '1080p Full HD (Recommended)',   quality: '1080', description: 'Crystal-clear 1080p Full HD MP4 video',               badge: '1080p FULL HD', type: 'video', url: videoId, extension: 'mp4', recommend: true  },
-    { id: 'yt_720p_hd',    label: '720p HD (Fast Download)',       quality: '720',  description: 'Standard HD MP4 — fast to save and share',            badge: '720p HD',      type: 'video', url: videoId, extension: 'mp4', recommend: false },
-    { id: 'yt_360p_sd',    label: '360p Standard MP4',             quality: '360',  description: 'Compact file size for quick messaging',               badge: 'Standard MP4', type: 'video', url: videoId, extension: 'mp4', recommend: false },
-    { id: 'yt_audio_mp3',  label: 'Download Audio (MP3)',          quality: 'audio', description: 'Extract speech, song or soundtrack as MP3',          badge: 'MP3 AUDIO',    type: 'audio', url: videoId, extension: 'mp3', recommend: false },
+    { id: 'yt_4k_2160p',   label: '4K Ultra HD (2160p)',           quality: '2160', description: 'Maximum resolution 4K Ultra HD video with audio',    badge: '4K ULTRA HD',  type: 'video', url: videoId, extension: 'mp4', recommend: false },
+    { id: 'yt_2k_1440p',   label: '2K Quad HD (1440p)',            quality: '1440', description: '1440p QHD format for large screens with audio',       badge: '2K QHD',       type: 'video', url: videoId, extension: 'mp4', recommend: false },
+    { id: 'yt_1080p_fhd',  label: '1080p Full HD (Recommended)',   quality: '1080', description: 'Crystal-clear 1080p Full HD MP4 with crisp audio',    badge: '1080p FULL HD', type: 'video', url: videoId, extension: 'mp4', recommend: true  },
+    { id: 'yt_720p_hd',    label: '720p HD (Fast Download)',       quality: '720',  description: 'Standard HD MP4 with audio — fast to save and share', badge: '720p HD',      type: 'video', url: videoId, extension: 'mp4', recommend: false },
+    { id: 'yt_360p_sd',    label: '360p Standard MP4',             quality: '360',  description: 'Compact file size with audio for quick messaging',    badge: 'Standard MP4', type: 'video', url: videoId, extension: 'mp4', recommend: false },
+    { id: 'yt_audio_mp3',  label: 'Download Audio (MP3)',          quality: 'audio', description: 'Extract speech, song or soundtrack as 320kbps MP3',  badge: 'MP3 AUDIO',    type: 'audio', url: videoId, extension: 'mp3', recommend: false },
     { id: 'yt_thumbnail',  label: 'Download HD Thumbnail Cover',   quality: 'thumb', description: 'Full-resolution video artwork image in JPG',         badge: 'HD IMAGE',     type: 'thumbnail', url: maxResThumbnail, extension: 'jpg', recommend: false },
   ];
 
@@ -212,6 +273,7 @@ async function extractYouTubeMedia(targetUrl: string) {
     extractedAt: Date.now(),
   };
 }
+
 // ─── API: /api/debug — Diagnostic endpoint ──────────────────────────────────
 
 app.get('/api/debug', async (req, res) => {
@@ -223,6 +285,8 @@ app.get('/api/debug', async (req, res) => {
     tmpExists: fs.existsSync('/tmp'),
     ytdlpTmpExists: fs.existsSync(YTDLP_TMP_PATH),
     ytdlpReadyPath,
+    ffmpegTmpExists: fs.existsSync(FFMPEG_TMP_PATH),
+    ffmpegReadyPath,
   };
 
   try {
@@ -235,18 +299,35 @@ app.get('/api/debug', async (req, res) => {
     info.ytdlpStderr = e?.stderr?.slice(0, 300);
   }
 
-  // Test stream URL extraction if video ID provided
+  try {
+    const ffBin = await ensureFfmpeg();
+    info.ffmpegBin = ffBin;
+    const { stdout } = await execFileAsync(ffBin, ['-version'], { timeout: 10000 });
+    info.ffmpegVersion = stdout.trim().split('\n')[0];
+  } catch (e: any) {
+    info.ffmpegError = e?.message?.slice(0, 300);
+  }
+
+  // Test stream extraction with video ID
   const testId = (req.query.id as string) || '0FnBozdvWg8';
   const cookieArgs = ensureCookiesFile();
   info.hasCookies = cookieArgs.length > 0;
   info.cookiesEnvSet = !!process.env.YOUTUBE_COOKIES;
+
   if (info.ytdlpBin) {
     try {
       const { stdout, stderr } = await execFileAsync(
         info.ytdlpBin,
-        ['-g', '-f', 'bestvideo[height<=720][ext=mp4]/bestvideo[height<=720]', '--no-playlist', '--js-runtimes', 'node',
-         ...cookieArgs,
-         `https://www.youtube.com/watch?v=${testId}`],
+        [
+          '-g',
+          '-f',
+          'bestvideo[height<=720][ext=mp4]+bestaudio[ext=m4a]/bestvideo[height<=720]+bestaudio/best',
+          '--no-playlist',
+          '--js-runtimes',
+          'node',
+          ...cookieArgs,
+          `https://www.youtube.com/watch?v=${testId}`,
+        ],
         { timeout: 30000 }
       );
       info.testStreamUrl = stdout.trim().split('\n')[0]?.slice(0, 100) + '...';
@@ -279,7 +360,7 @@ app.post('/api/extract', async (req, res) => {
 });
 
 // ─── API: /api/proxy-download ────────────────────────────────────────────────
-// Streams binary MP4/MP3/JPG directly to browser Downloads folder
+// Streams binary MP4 (merged video+audio) / MP3 / JPG directly to browser Downloads folder
 
 app.get('/api/proxy-download', async (req, res) => {
   try {
@@ -305,123 +386,117 @@ app.get('/api/proxy-download', async (req, res) => {
       return res.end(Buffer.from(buffer));
     }
 
-    // ── 2. Video / Audio download via yt-dlp ──────────────────────────────────
+    // ── 2. Video / Audio download via yt-dlp + ffmpeg muxing ──────────────────
     const videoId =
-      (typeof id === 'string' && id.trim()) ? id.trim() :
-      (typeof url === 'string' ? parseYouTubeUrl(url)?.videoId ?? '' : '');
+      typeof id === 'string' && id.trim()
+        ? id.trim()
+        : typeof url === 'string'
+        ? parseYouTubeUrl(url)?.videoId ?? ''
+        : '';
 
     if (!videoId) return res.status(400).json({ error: 'Missing video identifier.' });
 
     const isAudio = type === 'audio' || fileExt === 'mp3';
     const qualityStr = typeof quality === 'string' ? quality : '1080';
-
-    // Build yt-dlp format selector
-    let formatSelector: string;
-    if (isAudio) {
-      formatSelector = 'bestaudio[ext=m4a]/bestaudio';
-      fileExt = 'mp3';
-    } else if (qualityStr === '2160') {
-      formatSelector = 'bestvideo[height<=2160][ext=mp4]/bestvideo[height<=2160]';
-    } else if (qualityStr === '1440') {
-      formatSelector = 'bestvideo[height<=1440][ext=mp4]/bestvideo[height<=1440]';
-    } else if (qualityStr === '1080') {
-      formatSelector = 'bestvideo[height<=1080][ext=mp4]/bestvideo[height<=1080]';
-    } else if (qualityStr === '720') {
-      formatSelector = 'bestvideo[height<=720][ext=mp4]/bestvideo[height<=720]';
-    } else {
-      formatSelector = 'bestvideo[height<=480][ext=mp4]/bestvideo[height<=480]';
-    }
+    if (isAudio) fileExt = 'mp3';
 
     const ytUrl = `https://www.youtube.com/watch?v=${videoId}`;
 
-    // Get yt-dlp binary (downloads it to /tmp on Vercel cold start)
+    // Ensure yt-dlp and ffmpeg are ready
     let ytdlpBin: string;
+    let ffmpegBin: string;
     try {
-      ytdlpBin = await Promise.race([
-        ensureYtDlp(),
-        new Promise<never>((_, reject) => setTimeout(() => reject(new Error('yt-dlp setup timeout')), 50000)),
+      const [yt, ff] = await Promise.all([
+        Promise.race([
+          ensureYtDlp(),
+          new Promise<never>((_, reject) => setTimeout(() => reject(new Error('yt-dlp setup timeout')), 50000)),
+        ]),
+        Promise.race([
+          ensureFfmpeg(),
+          new Promise<never>((_, reject) => setTimeout(() => reject(new Error('ffmpeg setup timeout')), 50000)),
+        ]),
       ]);
+      ytdlpBin = yt;
+      ffmpegBin = ff;
     } catch (setupErr: any) {
-      console.error('[yt-dlp] Setup failed:', setupErr?.message);
-      return res.status(503).json({ error: 'Download service is starting up. Please wait 30 seconds and try again.' });
+      console.error('[setup] Failed:', setupErr?.message);
+      return res.status(503).json({ error: 'Download engine is initialising. Please try again in 15 seconds.' });
     }
 
-    // Resolve direct GoogleVideo CDN stream URL
-    let directStreamUrl = '';
-    let lastError = '';
     const cookieArgs = ensureCookiesFile();
+    const tempFileId = `dl_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+    const tmpFile = path.join('/tmp', `${tempFileId}.${fileExt}`);
+
+    // Build format and arguments for yt-dlp
+    let ytdlpArgs: string[];
+    if (isAudio) {
+      ytdlpArgs = [
+        '-x',
+        '--audio-format', 'mp3',
+        '--audio-quality', '0',
+        '--ffmpeg-location', ffmpegBin,
+        '-o', tmpFile,
+        '--no-playlist',
+        '--js-runtimes', 'node',
+        ...cookieArgs,
+        ytUrl,
+      ];
+    } else {
+      const format = `bestvideo[height<=${qualityStr}][ext=mp4]+bestaudio[ext=m4a]/bestvideo[height<=${qualityStr}]+bestaudio/best[height<=${qualityStr}]/best`;
+      ytdlpArgs = [
+        '-f', format,
+        '--merge-output-format', 'mp4',
+        '--ffmpeg-location', ffmpegBin,
+        '-o', tmpFile,
+        '--no-playlist',
+        '--js-runtimes', 'node',
+        ...cookieArgs,
+        ytUrl,
+      ];
+    }
+
+    console.log('[yt-dlp] Downloading & muxing:', ytdlpArgs.join(' '));
     try {
-      const { stdout } = await execFileAsync(
-        ytdlpBin,
-        ['-g', '-f', formatSelector, '--no-playlist', '--js-runtimes', 'node', ...cookieArgs, ytUrl],
-        { timeout: 30000 }
-      );
-      directStreamUrl = stdout.trim().split('\n')[0].trim();
-      console.log('[yt-dlp] Resolved stream URL for', videoId, qualityStr);
+      await execFileAsync(ytdlpBin, ytdlpArgs, { timeout: 50000 });
     } catch (execErr: any) {
-      lastError = (execErr?.stderr || execErr?.message || 'unknown error').slice(0, 300);
-      console.warn('[yt-dlp] Primary selector failed:', lastError);
-      try {
-        const fallbackFmt = isAudio ? 'bestaudio' : 'bestvideo[ext=mp4]/best[ext=mp4]/best';
-        const { stdout } = await execFileAsync(
-          ytdlpBin,
-          ['-g', '-f', fallbackFmt, '--no-playlist', '--js-runtimes', 'node', ...cookieArgs, ytUrl],
-          { timeout: 30000 }
-        );
-        directStreamUrl = stdout.trim().split('\n')[0].trim();
-      } catch (fallbackErr: any) {
-        lastError = (fallbackErr?.stderr || fallbackErr?.message || 'unknown error').slice(0, 300);
-        console.error('[yt-dlp] All selectors failed:', lastError);
-      }
+      const errDetail = (execErr?.stderr || execErr?.message || 'unknown error').slice(0, 300);
+      console.error('[yt-dlp] Exec error:', errDetail);
+      return res.status(500).json({ error: 'Could not process media download.', detail: errDetail });
     }
 
-    if (!directStreamUrl || !directStreamUrl.startsWith('http')) {
-      const cookieFileExists = fs.existsSync(COOKIES_PATH);
-      const cookieFileSize = cookieFileExists ? fs.statSync(COOKIES_PATH).size : 0;
-      return res.status(500).json({
-        error: 'Could not resolve media stream.',
-        detail: lastError,
-        debug: { cookieArgs: cookieArgs.length, cookieFileExists, cookieFileSize, ytdlpBin, formatSelector }
-      });
+    // Verify output file exists and is not empty
+    if (!fs.existsSync(tmpFile)) {
+      return res.status(500).json({ error: 'Failed to generate media file.' });
     }
 
-    // Stream Google CDN directly to user with attachment header
-    const streamRes = await fetch(directStreamUrl, {
-      headers: {
-        'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36',
-        Referer: 'https://www.youtube.com/',
-      },
-    });
-
-    if (!streamRes.ok) {
-      return res.status(streamRes.status).json({ error: `Stream server returned ${streamRes.status}` });
+    const stat = fs.statSync(tmpFile);
+    if (stat.size === 0) {
+      try { fs.unlinkSync(tmpFile); } catch {}
+      return res.status(500).json({ error: 'Generated file is empty.' });
     }
 
     const contentType = isAudio ? 'audio/mpeg' : 'video/mp4';
-    const contentLength = streamRes.headers.get('content-length');
-
     res.setHeader('Content-Disposition', `attachment; filename="${safeFilename}.${fileExt}"`);
     res.setHeader('Content-Type', contentType);
-    if (contentLength) res.setHeader('Content-Length', contentLength);
+    res.setHeader('Content-Length', String(stat.size));
     res.setHeader('Cache-Control', 'no-cache');
 
-    // Pipe stream to browser
-    if (streamRes.body) {
-      const reader = streamRes.body.getReader();
+    const readStream = fs.createReadStream(tmpFile);
+    readStream.pipe(res);
+
+    const cleanup = () => {
       try {
-        while (true) {
-          const { done, value } = await reader.read();
-          if (done) break;
-          res.write(Buffer.from(value));
-        }
-        res.end();
-      } catch {
-        res.end();
-      }
-    } else {
-      const buffer = await streamRes.arrayBuffer();
-      res.end(Buffer.from(buffer));
-    }
+        if (fs.existsSync(tmpFile)) fs.unlinkSync(tmpFile);
+      } catch {}
+    };
+
+    res.on('finish', cleanup);
+    res.on('close', cleanup);
+    readStream.on('error', (err) => {
+      console.error('[stream] File read error:', err);
+      cleanup();
+      if (!res.headersSent) res.status(500).json({ error: 'Stream interrupted.' });
+    });
   } catch (err: any) {
     console.error('Download proxy error:', err);
     if (!res.headersSent) {
