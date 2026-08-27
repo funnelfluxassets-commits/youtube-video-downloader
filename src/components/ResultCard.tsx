@@ -93,7 +93,7 @@ export const ResultCard: React.FC<ResultCardProps> = ({ result, canDownload, onS
       if (option.type === 'thumbnail') {
         endpoint = `/api/proxy-download?url=${encodeURIComponent(result.cover)}&filename=${encodeURIComponent(safeTitle)}&ext=jpg`;
       } else {
-        endpoint = `/api/proxy-download?id=${result.id}&quality=${encodeURIComponent(option.quality)}&type=${option.type}&filename=${encodeURIComponent(safeTitle)}&ext=${ext}`;
+        endpoint = `/api/proxy-download?id=${result.id}&quality=${encodeURIComponent(option.quality)}&type=${option.type}&filename=${encodeURIComponent(safeTitle)}&ext=${ext}&isShorts=${result.isShorts ? '1' : '0'}`;
       }
 
       const response = await fetch(endpoint);

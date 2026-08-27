@@ -442,7 +442,47 @@ app.get('/api/proxy-download', async (req, res) => {
         ytUrl,
       ];
     } else {
-      const format = `bestvideo[height<=${qualityStr}][vcodec^=avc]+bestaudio[acodec^=mp4a]/bestvideo[height<=${qualityStr}][vcodec^=avc]+bestaudio/bestvideo[height<=${qualityStr}][ext=mp4]+bestaudio[ext=m4a]/bestvideo[height<=${qualityStr}]+bestaudio/best[height<=${qualityStr}]/best`;
+      const isShortsVideo =
+        req.query.isShorts === '1' ||
+        (typeof url === 'string' && parseYouTubeUrl(url)?.isShorts) ||
+        (typeof id === 'string' && false);
+
+      const qNum = parseInt(qualityStr, 10) || 1080;
+      let maxHeight: number;
+      let maxWidth: number;
+
+      if (isShortsVideo) {
+        // Vertical video / Shorts (9:16)
+        const verticalMap: Record<number, { h: number; w: number }> = {
+          2160: { h: 3840, w: 2160 },
+          1440: { h: 2560, w: 1440 },
+          1080: { h: 1920, w: 1080 },
+          720:  { h: 1280, w: 720 },
+          480:  { h: 854,  w: 480 },
+          360:  { h: 640,  w: 360 },
+        };
+        const target = verticalMap[qNum] || { h: Math.round((qNum * 16) / 9), w: qNum };
+        maxHeight = target.h;
+        maxWidth = target.w;
+      } else {
+        // Horizontal video (16:9)
+        const horizontalMap: Record<number, { h: number; w: number }> = {
+          2160: { h: 2160, w: 3840 },
+          1440: { h: 1440, w: 2560 },
+          1080: { h: 1080, w: 1920 },
+          720:  { h: 720,  w: 1280 },
+          480:  { h: 480,  w: 854 },
+          360:  { h: 360,  w: 640 },
+        };
+        const target = horizontalMap[qNum] || { h: qNum, w: Math.round((qNum * 16) / 9) };
+        maxHeight = target.h;
+        maxWidth = target.w;
+      }
+
+      const h264Vid = `bestvideo[vcodec^=avc][height<=${maxHeight}][width<=${maxWidth}]`;
+      const fallbackVid = `bestvideo[height<=${maxHeight}][width<=${maxWidth}]`;
+      const format = `${h264Vid}+bestaudio[acodec^=mp4a]/${h264Vid}+bestaudio/${fallbackVid}+bestaudio/best`;
+
       ytdlpArgs = [
         '-f', format,
         '--merge-output-format', 'mp4',
