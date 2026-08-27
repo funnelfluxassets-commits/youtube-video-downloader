@@ -442,11 +442,12 @@ app.get('/api/proxy-download', async (req, res) => {
         ytUrl,
       ];
     } else {
-      const format = `bestvideo[height<=${qualityStr}][ext=mp4]+bestaudio[ext=m4a]/bestvideo[height<=${qualityStr}]+bestaudio/best[height<=${qualityStr}]/best`;
+      const format = `bestvideo[height<=${qualityStr}][vcodec^=avc]+bestaudio[acodec^=mp4a]/bestvideo[height<=${qualityStr}][vcodec^=avc]+bestaudio/bestvideo[height<=${qualityStr}][ext=mp4]+bestaudio[ext=m4a]/bestvideo[height<=${qualityStr}]+bestaudio/best[height<=${qualityStr}]/best`;
       ytdlpArgs = [
         '-f', format,
         '--merge-output-format', 'mp4',
         '--ffmpeg-location', ffmpegBin,
+        '--postprocessor-args', 'ffmpeg:-movflags +faststart',
         '-o', tmpFile,
         '--no-playlist',
         '--js-runtimes', 'node',
