@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9"
+        xmlns:xhtml="http://www.sitemaps.org/schemas/sitemap/0.9"
+        xmlns:image="http://www.google.com/schemas/sitemap-image/1.1">
+  <url>
+    <loc>https://youtube-video-downloader.funnelfluxassets.com/</loc>
+    <lastmod>2026-08-27</lastmod>
+    <changefreq>daily</changefreq>
+    <priority>1.0</priority>
+    <image:image>
+      <image:loc>https://youtube-video-downloader.funnelfluxassets.com/logo.png</image:loc>
+      <image:title>TubeDownloader - Free YouTube Video &amp; Shorts Downloader</image:title>
+      <image:caption>Download YouTube videos and Shorts in 4K, 2K, 1080p Full HD MP4 or extract 320kbps MP3 audio</image:caption>
+    </image:image>
+  </url>
+</urlset>
