@@ -481,9 +481,7 @@ app.get('/api/proxy-download', async (req, res) => {
         maxWidth = target.w;
       }
 
-      const h264Vid = `bestvideo[vcodec^=avc][height<=${maxHeight}][width<=${maxWidth}]`;
-      const fallbackVid = `bestvideo[height<=${maxHeight}][width<=${maxWidth}]`;
-      const format = `${h264Vid}+bestaudio[acodec^=mp4a]/${h264Vid}+bestaudio/${fallbackVid}+bestaudio/best`;
+      const format = `bestvideo[height<=${maxHeight}][width<=${maxWidth}]+bestaudio/bestvideo[height<=${maxHeight}]+bestaudio/bestvideo+bestaudio/best`;
 
       ytdlpArgs = [
         '-f', format,
