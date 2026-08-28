@@ -319,18 +319,27 @@ export default function App() {
       />
 
       {/* Clean Footer */}
-      <footer className="border-t border-zinc-200 dark:border-zinc-800/80 bg-white dark:bg-zinc-950 px-3 sm:px-6 text-xs text-zinc-500 dark:text-zinc-400 transition-colors">
-        <div className="max-w-5xl mx-auto h-14 sm:h-16 flex items-center justify-center sm:justify-between gap-4">
-          <div className="flex items-center gap-2.5">
-            <div className="w-8 h-8 rounded-lg bg-gradient-to-tr from-red-600 via-rose-600 to-orange-500 p-[1.5px] shadow-sm flex items-center justify-center">
-              <div className="w-full h-full bg-zinc-950 rounded-[6.5px] flex items-center justify-center">
-                <Play className="w-4 h-4 text-red-500 fill-red-500 translate-x-0.5" />
+      <footer className="border-t border-zinc-200 dark:border-zinc-800/80 bg-white dark:bg-zinc-950 py-8 px-4 text-xs text-zinc-500 dark:text-zinc-400 transition-colors">
+        <div className="max-w-5xl mx-auto space-y-4">
+          <div className="flex flex-col sm:flex-row items-center justify-between gap-4">
+            <div className="flex items-center gap-2.5">
+              <div className="w-8 h-8 rounded-lg bg-gradient-to-tr from-red-600 via-rose-600 to-orange-500 p-[1.5px] shadow-sm flex items-center justify-center">
+                <div className="w-full h-full bg-zinc-950 rounded-[6.5px] flex items-center justify-center">
+                  <Play className="w-4 h-4 text-red-500 fill-red-500 translate-x-0.5" />
+                </div>
+              </div>
+              <div className="flex flex-wrap items-center justify-center sm:justify-start gap-1 sm:gap-1.5 whitespace-nowrap text-center">
+                <span className="font-bold text-xs sm:text-sm text-zinc-900 dark:text-white tracking-tight">TubeDownloader</span>
+                <span className="text-[11px] sm:text-xs text-zinc-400 dark:text-zinc-500 whitespace-nowrap">• Zero Watermarks • 100% Free</span>
               </div>
             </div>
-            <div className="flex flex-wrap items-center justify-center sm:justify-start gap-1 sm:gap-1.5 whitespace-nowrap text-center">
-              <span className="font-bold text-xs sm:text-sm text-zinc-900 dark:text-white tracking-tight">TubeDownloader</span>
-              <span className="text-[11px] sm:text-xs text-zinc-400 dark:text-zinc-500 whitespace-nowrap">— YouTube Video & Shorts Downloader</span>
-            </div>
+            <p className="text-[11px] text-zinc-400">Built for content creators</p>
+          </div>
+
+          <div className="pt-4 border-t border-zinc-200/60 dark:border-zinc-800/60 text-[11px] text-zinc-400 dark:text-zinc-500 leading-relaxed text-center sm:text-left">
+            <p>
+              <strong>Disclaimer:</strong> TubeDownloader is an independent utility tool and is not affiliated, associated, authorized, endorsed by, or in any way officially connected with YouTube, Google LLC, Alphabet Inc., or any of their subsidiaries or affiliates. The official YouTube website can be found at <a href="https://www.youtube.com" target="_blank" rel="noopener noreferrer" className="underline hover:text-zinc-600 dark:hover:text-zinc-300">youtube.com</a>. The name "YouTube" as well as related names, marks, emblems, and images are registered trademarks of their respective owners.
+            </p>
           </div>
         </div>
       </footer>
