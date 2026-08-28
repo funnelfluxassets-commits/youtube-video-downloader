@@ -164,19 +164,17 @@ const COOKIES_PATH = '/tmp/yt-cookies.txt';
 let cookiesWritten = false;
 
 function ensureCookiesFile(): string[] {
-  const cookiesEnv = process.env.YOUTUBE_COOKIES;
+  const cookiesEnv = process.env.YOUTUBE_COOKIES || process.env.COOKIES_TXT;
   if (!cookiesEnv) return [];
 
   try {
-    if (!cookiesWritten) {
+    if (!fs.existsSync(COOKIES_PATH) || fs.statSync(COOKIES_PATH).size === 0) {
       let content = cookiesEnv;
       if (!content.includes('\n')) {
         content = content.split('\\n').join('\n');
       }
       fs.writeFileSync(COOKIES_PATH, content, 'utf-8');
-      cookiesWritten = true;
-      const lines = content.split('\n').filter((l) => l.trim() && !l.startsWith('#')).length;
-      console.log('[yt-dlp] Cookies written:', COOKIES_PATH, '- data lines:', lines, 'size:', content.length);
+      console.log('[yt-dlp] YouTube cookies written to /tmp/yt-cookies.txt');
     }
     return ['--cookies', COOKIES_PATH];
   } catch (err: any) {
@@ -425,7 +423,7 @@ app.get('/api/proxy-download', async (req, res) => {
 
     const cookieArgs = ensureCookiesFile();
     const tempFileId = `dl_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
-    const tmpFile = path.join('/tmp', `${tempFileId}.${fileExt}`);
+    const tmpFile = path.join('/tmp', tempFileId);
 
     // Build format and arguments for yt-dlp
     let ytdlpArgs: string[];
@@ -435,6 +433,10 @@ app.get('/api/proxy-download', async (req, res) => {
         '--audio-format', 'mp3',
         '--audio-quality', '0',
         '--ffmpeg-location', ffmpegBin,
+        '--add-header', 'User-Agent:Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
+        '--add-header', 'Referer:https://www.youtube.com/',
+        '--add-header', 'Accept-Language:en-US,en;q=0.9',
+        '--extractor-args', 'youtube:player_client=android,web',
         '-o', tmpFile,
         '--no-playlist',
         '--js-runtimes', 'node',
@@ -488,6 +490,10 @@ app.get('/api/proxy-download', async (req, res) => {
         '--merge-output-format', 'mp4',
         '--ffmpeg-location', ffmpegBin,
         '--postprocessor-args', 'ffmpeg:-movflags +faststart',
+        '--add-header', 'User-Agent:Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
+        '--add-header', 'Referer:https://www.youtube.com/',
+        '--add-header', 'Accept-Language:en-US,en;q=0.9',
+        '--extractor-args', 'youtube:player_client=android,web',
         '-o', tmpFile,
         '--no-playlist',
         '--js-runtimes', 'node',
@@ -505,14 +511,22 @@ app.get('/api/proxy-download', async (req, res) => {
       return res.status(500).json({ error: 'Could not process media download.', detail: errDetail });
     }
 
+    let actualFile = tmpFile;
+    if (!fs.existsSync(actualFile)) {
+      if (fs.existsSync(`${tmpFile}.mp3`)) actualFile = `${tmpFile}.mp3`;
+      else if (fs.existsSync(`${tmpFile}.mp4`)) actualFile = `${tmpFile}.mp4`;
+      else if (fs.existsSync(path.join('/tmp', `${tempFileId}.mp3`))) actualFile = path.join('/tmp', `${tempFileId}.mp3`);
+      else if (fs.existsSync(path.join('/tmp', `${tempFileId}.mp4`))) actualFile = path.join('/tmp', `${tempFileId}.mp4`);
+    }
+
     // Verify output file exists and is not empty
-    if (!fs.existsSync(tmpFile)) {
+    if (!fs.existsSync(actualFile)) {
       return res.status(500).json({ error: 'Failed to generate media file.' });
     }
 
-    const stat = fs.statSync(tmpFile);
+    const stat = fs.statSync(actualFile);
     if (stat.size === 0) {
-      try { fs.unlinkSync(tmpFile); } catch {}
+      try { fs.unlinkSync(actualFile); } catch {}
       return res.status(500).json({ error: 'Generated file is empty.' });
     }
 
@@ -522,12 +536,15 @@ app.get('/api/proxy-download', async (req, res) => {
     res.setHeader('Content-Length', String(stat.size));
     res.setHeader('Cache-Control', 'no-cache');
 
-    const readStream = fs.createReadStream(tmpFile);
+    const readStream = fs.createReadStream(actualFile);
     readStream.pipe(res);
 
     const cleanup = () => {
       try {
+        if (fs.existsSync(actualFile)) fs.unlinkSync(actualFile);
         if (fs.existsSync(tmpFile)) fs.unlinkSync(tmpFile);
+        if (fs.existsSync(`${tmpFile}.mp3`)) fs.unlinkSync(`${tmpFile}.mp3`);
+        if (fs.existsSync(`${tmpFile}.mp4`)) fs.unlinkSync(`${tmpFile}.mp4`);
       } catch {}
     };
 
