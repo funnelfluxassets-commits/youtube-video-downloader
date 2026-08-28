@@ -333,7 +333,9 @@ export default function App() {
                 <span className="text-[11px] sm:text-xs text-zinc-400 dark:text-zinc-500 whitespace-nowrap">• Zero Watermarks • 100% Free</span>
               </div>
             </div>
-            <p className="text-[11px] text-zinc-400">Built for content creators</p>
+            <p className="flex items-center gap-1">
+              Built with <Heart className="w-3.5 h-3.5 text-rose-500 fill-current" /> for content creators
+            </p>
           </div>
 
           <div className="pt-4 border-t border-zinc-200/60 dark:border-zinc-800/60 text-[11px] text-zinc-400 dark:text-zinc-500 leading-relaxed text-center sm:text-left">
