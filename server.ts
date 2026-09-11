@@ -430,6 +430,7 @@ app.get('/api/proxy-download', async (req, res) => {
     if (isAudio) {
       ytdlpArgs = [
         '-f', 'ba/b/bestaudio/best',
+        '--extractor-args', 'youtube:player_client=web_embedded,web_creator,mweb',
         '-x',
         '--audio-format', 'mp3',
         '--audio-quality', '192K',
@@ -445,17 +446,12 @@ app.get('/api/proxy-download', async (req, res) => {
         ytUrl,
       ];
     } else {
-      const isShortsVideo =
-        req.query.isShorts === '1' ||
-        (typeof url === 'string' && parseYouTubeUrl(url)?.isShorts) ||
-        (typeof id === 'string' && false);
-
       const qNum = parseInt(qualityStr, 10) || 1080;
-      const maxDim = Math.max(qNum, Math.round((qNum * 16) / 9));
-      const format = `bestvideo[height<=${maxDim}][width<=${maxDim}]+bestaudio/best[height<=${maxDim}][width<=${maxDim}]/bestvideo+bestaudio/best`;
+      const format = `bestvideo[height<=${qNum}][ext=mp4]+bestaudio[ext=m4a]/bestvideo[height<=${qNum}]+bestaudio/best[height<=${qNum}]/best`;
 
       ytdlpArgs = [
         '-f', format,
+        '--extractor-args', 'youtube:player_client=web_embedded,web_creator,mweb',
         '--merge-output-format', 'mp4',
         '--ffmpeg-location', ffmpegBin,
         '--postprocessor-args', 'ffmpeg:-c:a aac -b:a 192k -movflags +faststart',
