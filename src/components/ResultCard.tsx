@@ -56,7 +56,19 @@ export const ResultCard: React.FC<ResultCardProps> = ({ result, canDownload, onS
     return `${authorSlug}_${titleSlug}`;
   }, [authorSlug, titleSlug]);
 
+  const presetCaptionOnly = useMemo(() => {
+    return titleSlug;
+  }, [titleSlug]);
+
+  const presetCreatorId = useMemo(() => {
+    return `${authorSlug}_${result.id}`;
+  }, [authorSlug, result.id]);
+
   const [customFilename, setCustomFilename] = useState<string>(presetCreatorCaption);
+
+  useEffect(() => {
+    setCustomFilename(presetCreatorCaption);
+  }, [presetCreatorCaption]);
 
   const handleCopyCaption = () => {
     if (result.title) {
@@ -348,8 +360,34 @@ export const ResultCard: React.FC<ResultCardProps> = ({ result, canDownload, onS
               value={customFilename}
               onChange={(e) => setCustomFilename(e.target.value)}
               placeholder="Enter custom download filename..."
-              className="w-full text-xs sm:text-sm px-3 py-2 bg-zinc-50 dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 rounded-xl text-zinc-900 dark:text-zinc-100 outline-none focus:border-red-500"
+              className="w-full text-xs sm:text-sm px-3.5 py-2 bg-zinc-50 dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 rounded-xl text-zinc-900 dark:text-zinc-100 outline-none focus:border-red-500"
             />
+
+            {/* Quick Presets */}
+            <div className="flex items-center gap-1.5 flex-wrap pt-1">
+              <span className="text-[10px] text-zinc-400">Presets:</span>
+              <button
+                type="button"
+                onClick={() => setCustomFilename(presetCreatorCaption)}
+                className="text-[10px] px-2 py-0.5 rounded-md bg-zinc-100 dark:bg-zinc-800 text-zinc-600 dark:text-zinc-400 hover:bg-zinc-200 dark:hover:bg-zinc-700 cursor-pointer truncate max-w-[140px]"
+              >
+                Author + Title
+              </button>
+              <button
+                type="button"
+                onClick={() => setCustomFilename(presetCaptionOnly)}
+                className="text-[10px] px-2 py-0.5 rounded-md bg-zinc-100 dark:bg-zinc-800 text-zinc-600 dark:text-zinc-400 hover:bg-zinc-200 dark:hover:bg-zinc-700 cursor-pointer truncate max-w-[120px]"
+              >
+                Title Only
+              </button>
+              <button
+                type="button"
+                onClick={() => setCustomFilename(presetCreatorId)}
+                className="text-[10px] px-2 py-0.5 rounded-md bg-zinc-100 dark:bg-zinc-800 text-zinc-600 dark:text-zinc-400 hover:bg-zinc-200 dark:hover:bg-zinc-700 cursor-pointer truncate max-w-[120px]"
+              >
+                Author + ID
+              </button>
+            </div>
           </div>
 
           {downloadError && (

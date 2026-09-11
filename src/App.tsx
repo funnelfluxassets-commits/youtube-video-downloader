@@ -202,13 +202,6 @@ export default function App() {
 
       setResult(data.data);
       saveToHistory(data.data);
-
-      setTimeout(() => {
-        const resultElem = document.getElementById('extraction-result-section');
-        if (resultElem) {
-          resultElem.scrollIntoView({ behavior: 'smooth', block: 'start' });
-        }
-      }, 100);
     } catch (err: any) {
       setError(err?.message || 'An unexpected error occurred while extracting the video.');
       setResult(null);
