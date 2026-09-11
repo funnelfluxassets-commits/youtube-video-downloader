@@ -318,8 +318,10 @@ app.get('/api/debug', async (req, res) => {
         info.ytdlpBin,
         [
           '-g',
+          '-S',
+          'res:720,vcodec:h264,ext:mp4:m4a',
           '-f',
-          'bestvideo[height<=720][ext=mp4]+bestaudio[ext=m4a]/bestvideo[height<=720]+bestaudio/best',
+          'bestvideo+bestaudio/best',
           '--no-playlist',
           '--js-runtimes',
           'node',
@@ -426,15 +428,15 @@ app.get('/api/proxy-download', async (req, res) => {
     const tmpFile = path.join('/tmp', tempFileId);
 
     // Build format and arguments for yt-dlp
+    const ffmpegArgs = ffmpegBin === 'ffmpeg' ? [] : ['--ffmpeg-location', ffmpegBin];
     let ytdlpArgs: string[];
     if (isAudio) {
       ytdlpArgs = [
-        '-f', 'ba/b/bestaudio/best',
-        '--extractor-args', 'youtube:player_client=web_embedded,web_creator,mweb',
+        '-f', 'ba[ext=m4a]/ba/b/bestaudio/best',
         '-x',
         '--audio-format', 'mp3',
         '--audio-quality', '192K',
-        '--ffmpeg-location', ffmpegBin,
+        ...ffmpegArgs,
         '--add-header', 'User-Agent:Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
         '--add-header', 'Referer:https://www.youtube.com/',
         '--add-header', 'Accept-Language:en-US,en;q=0.9',
@@ -447,13 +449,12 @@ app.get('/api/proxy-download', async (req, res) => {
       ];
     } else {
       const qNum = parseInt(qualityStr, 10) || 1080;
-      const format = `bestvideo[height<=${qNum}][ext=mp4]+bestaudio[ext=m4a]/bestvideo[height<=${qNum}]+bestaudio/best[height<=${qNum}]/best`;
 
       ytdlpArgs = [
-        '-f', format,
-        '--extractor-args', 'youtube:player_client=web_embedded,web_creator,mweb',
+        '-S', `res:${qNum},vcodec:h264,ext:mp4:m4a`,
+        '-f', 'bestvideo+bestaudio/best',
         '--merge-output-format', 'mp4',
-        '--ffmpeg-location', ffmpegBin,
+        ...ffmpegArgs,
         '--postprocessor-args', 'ffmpeg:-c:a aac -b:a 192k -movflags +faststart',
         '--add-header', 'User-Agent:Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
         '--add-header', 'Referer:https://www.youtube.com/',
