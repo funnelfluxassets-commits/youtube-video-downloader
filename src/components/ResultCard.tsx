@@ -96,7 +96,28 @@ export const ResultCard: React.FC<ResultCardProps> = ({ result, canDownload, onS
         endpoint = `/api/proxy-download?id=${result.id}&quality=${encodeURIComponent(option.quality)}&type=${option.type}&filename=${encodeURIComponent(safeTitle)}&ext=${ext}&isShorts=${result.isShorts ? '1' : '0'}`;
       }
 
-      const response = await fetch(endpoint);
+      let response: Response | null = null;
+
+      // 1. Try direct in-browser fetch for thumbnail images (0 MB server bandwidth)
+      if (option.type === 'thumbnail' && result.cover) {
+        try {
+          const controller = new AbortController();
+          const timer = setTimeout(() => controller.abort(), 3500);
+          const directRes = await fetch(result.cover, { signal: controller.signal });
+          clearTimeout(timer);
+          if (directRes.ok) {
+            response = directRes;
+          }
+        } catch {
+          // Fall back below
+        }
+      }
+
+      // 2. If direct fetch not available or failed, use Vercel proxy
+      if (!response) {
+        response = await fetch(endpoint);
+      }
+
       if (!response.ok) {
         const errorJson = await response.json().catch(() => null);
         const msg = errorJson?.detail
