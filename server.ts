@@ -429,7 +429,7 @@ app.get('/api/proxy-download', async (req, res) => {
     let ytdlpArgs: string[];
     if (isAudio) {
       ytdlpArgs = [
-        '-f', 'ba[ext=m4a]/ba[acodec^=mp4a]/ba/bestaudio',
+        '-f', 'ba/b/bestaudio/best',
         '-x',
         '--audio-format', 'mp3',
         '--audio-quality', '192K',
@@ -452,7 +452,7 @@ app.get('/api/proxy-download', async (req, res) => {
 
       const qNum = parseInt(qualityStr, 10) || 1080;
       const maxDim = Math.max(qNum, Math.round((qNum * 16) / 9));
-      const format = `bestvideo[vcodec^=avc][height<=${maxDim}][width<=${maxDim}]+bestaudio[acodec^=mp4a]/bestvideo[vcodec^=avc][height<=${maxDim}][width<=${maxDim}]+bestaudio/bestvideo[height<=${maxDim}][width<=${maxDim}]+bestaudio[acodec^=mp4a]/bestvideo[height<=${maxDim}][width<=${maxDim}]+bestaudio/best`;
+      const format = `bestvideo[height<=${maxDim}][width<=${maxDim}]+bestaudio/best[height<=${maxDim}][width<=${maxDim}]/bestvideo+bestaudio/best`;
 
       ytdlpArgs = [
         '-f', format,
