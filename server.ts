@@ -308,9 +308,11 @@ app.get('/api/debug', async (req, res) => {
 
   // Test stream extraction with video ID
   const testId = (req.query.id as string) || '0FnBozdvWg8';
-  const cookieArgs = ensureCookiesFile();
+  const useCookies = req.query.nocookies !== '1';
+  const cookieArgs = useCookies ? ensureCookiesFile() : [];
   info.hasCookies = cookieArgs.length > 0;
   info.cookiesEnvSet = !!process.env.YOUTUBE_COOKIES;
+  info.usingCookies = useCookies;
 
   if (info.ytdlpBin) {
     try {
@@ -330,8 +332,9 @@ app.get('/api/debug', async (req, res) => {
         ],
         { timeout: 30000 }
       );
+      info.stdoutLines = stdout.trim().split('\n').map((l) => l.slice(0, 150));
       info.testStreamUrl = stdout.trim().split('\n')[0]?.slice(0, 100) + '...';
-      info.testStderr = stderr?.slice(0, 200);
+      info.testStderr = stderr?.slice(0, 500);
       info.testSuccess = true;
     } catch (e: any) {
       info.testSuccess = false;
@@ -423,7 +426,7 @@ app.get('/api/proxy-download', async (req, res) => {
       return res.status(503).json({ error: 'Download engine is initialising. Please try again in 15 seconds.' });
     }
 
-    const cookieArgs = ensureCookiesFile();
+    const cookieArgs = req.query.nocookies === '1' ? [] : ensureCookiesFile();
     const tempFileId = `dl_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
     const tmpFile = path.join('/tmp', tempFileId);
 
