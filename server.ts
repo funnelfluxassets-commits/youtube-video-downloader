@@ -377,10 +377,13 @@ app.get('/api/test-mux', async (req, res) => {
     const ffmpegArgs = ffmpegBin === 'ffmpeg' ? [] : ['--ffmpeg-location', ffmpegBin];
     const tmpFile = path.join('/tmp', `test_mux_${Date.now()}.mp4`);
 
+    const clientName = (req.query.client as string) || 'visionos';
+    const extractorStr = `youtube:player_client=${clientName};formats=missing_pot`;
+
     const args = [
       '-S', `res:${qNum},vcodec:h264,ext:mp4:m4a`,
       '-f', 'bestvideo+bestaudio/best',
-      '--extractor-args', 'youtube:player_client=visionos;formats=missing_pot',
+      '--extractor-args', extractorStr,
       '--merge-output-format', 'mp4',
       ...ffmpegArgs,
       '--postprocessor-args', 'ffmpeg:-c:a aac -b:a 192k -movflags +faststart',
