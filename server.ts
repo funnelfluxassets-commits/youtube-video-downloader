@@ -317,17 +317,14 @@ app.get('/api/debug', async (req, res) => {
   if (info.ytdlpBin) {
     try {
       const isFormatsList = req.query.formats === '1';
-      const customClient = (req.query.client as string) || '';
-      const extractorArgs: string[] = ['youtube:formats=missing_pot'];
-      if (customClient) {
-        extractorArgs.push(`youtube:player_client=${customClient}`);
-      }
+      const customClient = (req.query.client as string) || 'mweb';
+      const extractorParam = `youtube:player_client=${customClient};formats=missing_pot`;
 
       const testArgs = isFormatsList
         ? [
             '-F',
             '--extractor-args',
-            extractorArgs.join(';'),
+            extractorParam,
             '--no-playlist',
             '--js-runtimes',
             'node',
@@ -341,7 +338,7 @@ app.get('/api/debug', async (req, res) => {
             '-f',
             'bestvideo+bestaudio/best',
             '--extractor-args',
-            extractorArgs.join(';'),
+            extractorParam,
             '--no-playlist',
             '--js-runtimes',
             'node',
@@ -374,12 +371,14 @@ app.get('/api/test-mux', async (req, res) => {
     const cookieArgs = req.query.nocookies === '1' ? [] : ensureCookiesFile();
     const testId = (req.query.id as string) || '0FnBozdvWg8';
     const qNum = parseInt((req.query.quality as string) || '1080', 10);
+    const client = (req.query.client as string) || 'mweb';
     const ffmpegArgs = ffmpegBin === 'ffmpeg' ? [] : ['--ffmpeg-location', ffmpegBin];
     const tmpFile = path.join('/tmp', `test_mux_${Date.now()}.mp4`);
 
     const args = [
-      '-S', `res:${qNum},proto:m3u8,vcodec:h264,ext:mp4:m4a`,
+      '-S', `res:${qNum},vcodec:h264,ext:mp4:m4a`,
       '-f', 'bestvideo+bestaudio/best',
+      '--extractor-args', `youtube:player_client=${client};formats=missing_pot`,
       '--merge-output-format', 'mp4',
       ...ffmpegArgs,
       '--postprocessor-args', 'ffmpeg:-c:a aac -b:a 192k -movflags +faststart',
@@ -492,14 +491,12 @@ app.get('/api/proxy-download', async (req, res) => {
     let ytdlpArgs: string[];
     if (isAudio) {
       ytdlpArgs = [
-        '-f', 'ba[protocol*=m3u8]/ba[ext=m4a]/ba/b/bestaudio/best',
+        '-f', 'ba[ext=m4a]/ba/b/bestaudio/best',
         '-x',
         '--audio-format', 'mp3',
         '--audio-quality', '192K',
+        '--extractor-args', 'youtube:player_client=mweb;formats=missing_pot',
         ...ffmpegArgs,
-        '--add-header', 'User-Agent:Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
-        '--add-header', 'Referer:https://www.youtube.com/',
-        '--add-header', 'Accept-Language:en-US,en;q=0.9',
         '-o', tmpFile,
         '--no-cache-dir',
         '--no-playlist',
@@ -511,14 +508,12 @@ app.get('/api/proxy-download', async (req, res) => {
       const qNum = parseInt(qualityStr, 10) || 1080;
 
       ytdlpArgs = [
-        '-S', `res:${qNum},proto:m3u8,vcodec:h264,ext:mp4:m4a`,
+        '-S', `res:${qNum},vcodec:h264,ext:mp4:m4a`,
         '-f', 'bestvideo+bestaudio/best',
+        '--extractor-args', 'youtube:player_client=mweb;formats=missing_pot',
         '--merge-output-format', 'mp4',
         ...ffmpegArgs,
         '--postprocessor-args', 'ffmpeg:-c:a aac -b:a 192k -movflags +faststart',
-        '--add-header', 'User-Agent:Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
-        '--add-header', 'Referer:https://www.youtube.com/',
-        '--add-header', 'Accept-Language:en-US,en;q=0.9',
         '-o', tmpFile,
         '--no-cache-dir',
         '--no-playlist',
