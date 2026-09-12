@@ -382,45 +382,6 @@ app.get('/api/debug', async (req, res) => {
   return res.json(info);
 });
 
-app.get('/api/test-mux', async (req, res) => {
-  try {
-    const ytdlpBin = await ensureYtDlp();
-    const ffmpegBin = await ensureFfmpeg();
-    const cookieArgs = req.query.nocookies === '1' ? [] : ensureCookiesFile();
-    const testId = (req.query.id as string) || '0FnBozdvWg8';
-    const qNum = parseInt((req.query.quality as string) || '1080', 10);
-    cleanOldTmpFiles();
-    const client = (req.query.client as string) || 'web_safari';
-    const ffmpegArgs = ffmpegBin === 'ffmpeg' ? [] : ['--ffmpeg-location', ffmpegBin];
-    const tmpFile = path.join('/tmp', `test_mux_${Date.now()}.mp4`);
-
-    const args = [
-      '-S', `res:${qNum},vcodec:h264,ext:mp4:m4a`,
-      '-f', 'bestvideo+bestaudio/best',
-      '--extractor-args', `youtube:player_client=${client};formats=missing_pot`,
-      '--merge-output-format', 'mp4',
-      ...ffmpegArgs,
-      '--postprocessor-args', 'ffmpeg:-c:a aac -b:a 192k -movflags +faststart',
-      '-o', tmpFile,
-      '--no-cache-dir',
-      '--no-playlist',
-      '--js-runtimes', 'node',
-      ...cookieArgs,
-      `https://www.youtube.com/watch?v=${testId}`,
-    ];
-
-    const { stdout, stderr } = await execFileAsync(ytdlpBin, args, { timeout: 45000 });
-    let size = 0;
-    if (fs.existsSync(tmpFile)) {
-      size = fs.statSync(tmpFile).size;
-      try { fs.unlinkSync(tmpFile); } catch {}
-    }
-    return res.json({ success: true, size, stdout: stdout.trim().split('\n'), stderr: stderr.trim().split('\n'), args });
-  } catch (err: any) {
-    return res.json({ success: false, error: err?.message, stderr: err?.stderr?.trim().split('\n') });
-  }
-});
-
 // ─── API: /api/extract ────────────────────────────────────────────────────────
 
 app.post('/api/extract', async (req, res) => {
