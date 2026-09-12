@@ -324,6 +324,8 @@ app.get('/api/debug', async (req, res) => {
           'res:720,vcodec:h264,ext:mp4:m4a',
           '-f',
           'bestvideo+bestaudio/best',
+          '--extractor-args',
+          'youtube:formats=missing_pot',
           '--no-playlist',
           '--js-runtimes',
           'node',
@@ -436,6 +438,7 @@ app.get('/api/proxy-download', async (req, res) => {
     if (isAudio) {
       ytdlpArgs = [
         '-f', 'ba[ext=m4a]/ba/b/bestaudio/best',
+        '--extractor-args', 'youtube:formats=missing_pot',
         '-x',
         '--audio-format', 'mp3',
         '--audio-quality', '192K',
@@ -456,6 +459,7 @@ app.get('/api/proxy-download', async (req, res) => {
       ytdlpArgs = [
         '-S', `res:${qNum},vcodec:h264,ext:mp4:m4a`,
         '-f', 'bestvideo+bestaudio/best',
+        '--extractor-args', 'youtube:formats=missing_pot',
         '--merge-output-format', 'mp4',
         ...ffmpegArgs,
         '--postprocessor-args', 'ffmpeg:-c:a aac -b:a 192k -movflags +faststart',
