@@ -316,32 +316,51 @@ app.get('/api/debug', async (req, res) => {
 
   if (info.ytdlpBin) {
     try {
-      const { stdout, stderr } = await execFileAsync(
-        info.ytdlpBin,
-        [
-          '-g',
-          '-S',
-          'res:720,vcodec:h264,ext:mp4:m4a',
-          '-f',
-          'bestvideo+bestaudio/best',
-          '--extractor-args',
-          'youtube:formats=missing_pot',
-          '--no-playlist',
-          '--js-runtimes',
-          'node',
-          ...cookieArgs,
-          `https://www.youtube.com/watch?v=${testId}`,
-        ],
-        { timeout: 30000 }
-      );
-      info.stdoutLines = stdout.trim().split('\n').map((l) => l.slice(0, 150));
-      info.testStreamUrl = stdout.trim().split('\n')[0]?.slice(0, 100) + '...';
+      const isFormatsList = req.query.formats === '1';
+      const customClient = (req.query.client as string) || '';
+      const extractorArgs: string[] = ['youtube:formats=missing_pot'];
+      if (customClient) {
+        extractorArgs.push(`youtube:player_client=${customClient}`);
+      }
+
+      const testArgs = isFormatsList
+        ? [
+            '-F',
+            '--extractor-args',
+            extractorArgs.join(';'),
+            '--no-playlist',
+            '--js-runtimes',
+            'node',
+            ...cookieArgs,
+            `https://www.youtube.com/watch?v=${testId}`,
+          ]
+        : [
+            '-g',
+            '-S',
+            'res:720,vcodec:h264,ext:mp4:m4a',
+            '-f',
+            'bestvideo+bestaudio/best',
+            '--extractor-args',
+            extractorArgs.join(';'),
+            '--no-playlist',
+            '--js-runtimes',
+            'node',
+            ...cookieArgs,
+            `https://www.youtube.com/watch?v=${testId}`,
+          ];
+
+      const { stdout, stderr } = await execFileAsync(info.ytdlpBin, testArgs, { timeout: 35000 });
+      if (isFormatsList) {
+        info.formatsTable = stdout.trim().split('\n').slice(-35);
+      } else {
+        info.stdoutLines = stdout.trim().split('\n');
+      }
       info.testStderr = stderr?.slice(0, 500);
       info.testSuccess = true;
     } catch (e: any) {
       info.testSuccess = false;
-      info.testError = e?.message?.slice(0, 300);
-      info.testStderr = e?.stderr?.slice(0, 300);
+      info.testError = e?.message?.slice(0, 400);
+      info.testStderr = e?.stderr?.slice(0, 400);
     }
   }
 
