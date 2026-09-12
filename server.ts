@@ -189,6 +189,24 @@ ensureFfmpeg().catch((e) => console.warn('[ffmpeg] Setup warning:', e?.message))
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
+function cleanOldTmpFiles() {
+  try {
+    const files = fs.readdirSync('/tmp');
+    const now = Date.now();
+    for (const file of files) {
+      if (file.startsWith('dl_') || file.startsWith('test_mux_') || file.includes('.part')) {
+        const fullPath = path.join('/tmp', file);
+        try {
+          const stats = fs.statSync(fullPath);
+          if (now - stats.mtimeMs > 30000) { // older than 30 seconds
+            fs.unlinkSync(fullPath);
+          }
+        } catch {}
+      }
+    }
+  } catch {}
+}
+
 function sanitizeFilename(name: string): string {
   const cleaned = name
     .replace(/[<>:"/\\|?*\x00-\x1F]/g, '')
@@ -371,7 +389,8 @@ app.get('/api/test-mux', async (req, res) => {
     const cookieArgs = req.query.nocookies === '1' ? [] : ensureCookiesFile();
     const testId = (req.query.id as string) || '0FnBozdvWg8';
     const qNum = parseInt((req.query.quality as string) || '1080', 10);
-    const client = (req.query.client as string) || 'mweb';
+    cleanOldTmpFiles();
+    const client = (req.query.client as string) || 'web_safari';
     const ffmpegArgs = ffmpegBin === 'ffmpeg' ? [] : ['--ffmpeg-location', ffmpegBin];
     const tmpFile = path.join('/tmp', `test_mux_${Date.now()}.mp4`);
 
@@ -487,6 +506,7 @@ app.get('/api/proxy-download', async (req, res) => {
     const tmpFile = path.join('/tmp', tempFileId);
 
     // Build format and arguments for yt-dlp
+    cleanOldTmpFiles();
     const ffmpegArgs = ffmpegBin === 'ffmpeg' ? [] : ['--ffmpeg-location', ffmpegBin];
     let ytdlpArgs: string[];
     if (isAudio) {
@@ -495,7 +515,7 @@ app.get('/api/proxy-download', async (req, res) => {
         '-x',
         '--audio-format', 'mp3',
         '--audio-quality', '192K',
-        '--extractor-args', 'youtube:player_client=mweb;formats=missing_pot',
+        '--extractor-args', 'youtube:player_client=web_safari;formats=missing_pot',
         ...ffmpegArgs,
         '-o', tmpFile,
         '--no-cache-dir',
@@ -510,7 +530,7 @@ app.get('/api/proxy-download', async (req, res) => {
       ytdlpArgs = [
         '-S', `res:${qNum},vcodec:h264,ext:mp4:m4a`,
         '-f', 'bestvideo+bestaudio/best',
-        '--extractor-args', 'youtube:player_client=mweb;formats=missing_pot',
+        '--extractor-args', 'youtube:player_client=web_safari;formats=missing_pot',
         '--merge-output-format', 'mp4',
         ...ffmpegArgs,
         '--postprocessor-args', 'ffmpeg:-c:a aac -b:a 192k -movflags +faststart',
